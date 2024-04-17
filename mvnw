@@ -1,3 +1,42 @@
+
+---
+- name: Clear Backup Files and Directories
+  hosts: your_target_hosts
+  become: true  # This enables the playbook to run with sudo privileges
+
+  tasks:
+    - name: Find and delete backup files
+      find:
+        paths: /path/to/search  # Specify the directory where backups are located
+        patterns: "*.bak"       # Specify the file pattern of backup files
+        recurse: yes            # Enable recursive search
+      register: backup_files
+
+    - name: Delete backup files
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ backup_files.files }}"
+      when: backup_files.matched > 0  # Execute only if backup files are found
+
+    - name: Find and delete backup directories
+      find:
+        paths: /path/to/search  # Specify the directory where backup directories are located
+        patterns: "backup_*"    # Specify the naming convention of backup directories
+        recurse: yes            # Enable recursive search
+        file_type: directory    # Specify to search only directories
+      register: backup_dirs
+
+    - name: Delete backup directories
+      file:
+        path: "{{ item.path }}"
+        state: absent
+        recurse: yes
+      with_items: "{{ backup_dirs.files }}"
+      when: backup_dirs.matched > 0  # Execute only if backup directories are found
+
+
+
 #!/bin/sh
 # ----------------------------------------------------------------------------
 # Licensed to the Apache Software Foundation (ASF) under one
