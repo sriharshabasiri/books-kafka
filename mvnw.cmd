@@ -1,3 +1,7 @@
+find /path/to/search -type f -newermt '1 hour ago' -printf '%p\t%TY-%Tm-%Td %TH:%TM:%TS\n'
+
+
+
 @REM ----------------------------------------------------------------------------
 @REM Licensed to the Apache Software Foundation (ASF) under one
 @REM or more contributor license agreements.  See the NOTICE file
