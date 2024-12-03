@@ -1,18 +1,3 @@
-#!/bin/bash
-
-ORG="ORG_NAME"
-TOKEN="YOUR_GITHUB_TOKEN"
-
-repos=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/orgs/$ORG/repos" | jq -r '.[].name')
-
-for repo in $repos; do
-  echo "Repository: $repo"
-  branches=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/$ORG/$repo/branches" | jq -r '.[].name')
-  echo "Branches:"
-  echo "$branches"
-  echo
-done
-
 #!/bin/sh
 # ----------------------------------------------------------------------------
 # Licensed to the Apache Software Foundation (ASF) under one
