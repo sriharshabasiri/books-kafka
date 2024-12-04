@@ -1,3 +1,4 @@
+As we move forward with the merger, I would like to understand if there has been any high-level decision regarding the core banking platforms for Deposits and DPL. Specifically, will the Finacle Core Banking Platform continue to be utilized, or is there a plan to migrate to the COF Core Banking Platform
 #!/bin/sh
 # ----------------------------------------------------------------------------
 # Licensed to the Apache Software Foundation (ASF) under one
