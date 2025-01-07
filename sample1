@@ -1,2 +1,195 @@
-updated sample file
-czx
+src=$1
+dest=$2
+fedir=$3
+
+getValueFromFile()
+{
+        value=`egrep "^$1=" ${INPUT_PROP_PATH} | grep -v "#"  | xargs`
+        value=`echo $value | cut -d "=" -f2`
+        echo $value
+}
+if [[ "$src" = "" ]] || [[ "$dest" = "" ]] || [[ "$fedir" = "" ]]
+then
+        echo "Invalid Arguments: Usage:./JbossVersionMig.sh OLD_VERSION_JBOSS_HOME NEW_VERSION_JBOSS_HOME FE_DIECTORY_PATH"
+exit 1
+fi
+
+INPUT_PROP_PATH=$fedir/common/config/install/fdm_inputs.cfg
+
+if [ ! -f "${INPUT_PROP_PATH}" ]
+then
+        echo "fdm_inputs.cfg doesnt exist in the FE directory. Please Validate the FE directory "
+        exit 1
+fi
+JBOSS_HOME=$src
+export INPUT_PROP_PATH
+
+newjbossver=`${dest}/bin/standalone.sh --version | grep "JBoss EAP .*(WildFly Core " | cut -d " " -f3 | tr -d -c [:digit:]`
+if [ "$newjbossver" = "" ]; then
+        echo "Unable to derive the  New Jboss version. Please check if the Java home set properly. Validate the Jboss installed"
+        exit 1
+fi
+
+oldjbossver=`${src}/bin/standalone.sh --version | grep "JBoss EAP .*(WildFly Core " | cut -d " " -f3 | tr -d -c [:digit:]`
+if [ "$oldjbossver" = "" ]; then
+        echo "Unable to derive the  Old Jboss version. Please check if the Java home set properly. Validate the Jboss installed"
+        exit 1
+fi
+
+if [ $newjbossver -le $oldjbossver ]
+then
+        echo "New Jboss version must be greater than older jboss version."
+        exit 1
+fi
+
+UBS_CUT_PATH=`getValueFromFile "UBS_CUT_PATH"`
+CRM_DPLY=`getValueFromFile "CRM_DPLY"`
+APP_SRVR_ENV=`getValueFromFile "APP_SRVR_ENV"`
+JBOSS_VERSION=`getValueFromFile "JBOSS_VERSION"`
+oldjbossVersion=`echo ${oldjbossver:0:1}.${oldjbossver:1:1}.${oldjbossver:2:1}`
+jbossVersion=`echo ${newjbossver:0:1}.${newjbossver:1:1}.${newjbossver:2:1}`
+cwd=`pwd`
+cp -r $dest "${dest}_${newjbossver}_orig"
+cd $dest/modules
+mv system system_orig
+cp -r $src/modules/* .
+cp -r $src/modules/system/layers/base/org/jdom system/layers/base/org/
+mv system system_old
+mv org org_old
+mv system_orig system
+rm -rf system_old org_old
+cp $src/encryptDBPassword.sh $dest
+chmod 755 $dest/encryptDBPassword.sh
+cd $src/modules/system/layers/base/javax/servlet/api/main
+oldredHatservJar=`ls jboss-servlet-api*jar`
+#cd $src/modules/system/layers/base/.overlays/layer-base-jboss-eap-${oldjbossVersion}.CP/org/jboss/as/remoting/main
+#oldredHatJar=`ls wildfly-remoting*jar`
+cd $dest/bin
+sed -i 's/deployments.migrate-deployments.skip=true/deployments.migrate-deployments.skip=false/' $dest/migration/configuration/environment.properties
+sh -x $dest/bin/jboss-server-migration.sh  -i false -s $src -t $dest > $cwd/migration.log 2>&1
+migStat="0"
+if [ "$APP_SRVR_ENV" = "Cluster" ]; then
+        if grep -q "standalone-full-ha.xml)*.*SUCCESS" $cwd/migration.log; then
+                echo "Migration status for cluster Success"
+                migStat="1"
+        fi
+else
+        if grep -q "standalone-full.xml)*.*SUCCESS" $cwd/migration.log; then
+                echo "Migration status for Single Server Success"
+                migStat="1"
+        fi
+fi
+if [ "$migStat" = "0" ]; then
+        echo "Jboss server Migration Failed!!! check the logs"
+        exit
+fi
+if [ "$APP_SRVR_ENV" = "Cluster" ]; then
+        File=${dest}/standalone/configuration/standalone-full-ha.xml
+else
+        File=${dest}/standalone/configuration/standalone-full.xml
+fi
+
+sed -i "s/<?xml version=\"1.0\" ?>/<?xml version=\'1.0\' encoding=\'UTF-8\'?>/" $File
+sed -i 's/<servlet-container name=\"default\" default-encoding=\"UTF-8\" use-listener-encoding=\"true\">/<servlet-container name=\"default\" default-encoding=\"UTF-8\" use-listener-encoding=\"true\" disable-file-watch-service=\"true\">/' $File
+cp $dest/bin/standalone.conf $dest/bin/standalone.conf_"${oldjbossVersion}_orig"
+cp $src/bin/standalone.conf $dest/bin
+cwd1=`pwd`
+cd  $src/modules/system/layers/base/org/jboss/logmanager/main
+OLD_JBOSS_LOG_MANAGER="$(echo jboss-logmanager-*.jar)"
+cd  $dest/modules/system/layers/base/org/jboss/logmanager/main
+NEW_JBOSS_LOG_MANAGER="$(echo jboss-logmanager-*.jar)"
+cd $cwd1
+cd  $src/modules/system/layers/base/org/wildfly/common/main
+OLD_JBOSS_COM_MANAGER="$(echo wildfly-common-*.jar)"
+cd  $dest/modules/system/layers/base/org/wildfly/common/main
+NEW_JBOSS_COM_MANAGER="$(echo wildfly-common-*.jar)"
+cd $cwd1
+
+sed -i "s@$OLD_JBOSS_LOG_MANAGER@$NEW_JBOSS_LOG_MANAGER@" $dest/bin/standalone.conf
+sed -i "s@$OLD_JBOSS_COM_MANAGER@$NEW_JBOSS_COM_MANAGER@" $dest/bin/standalone.conf
+
+mv $src $src"_${oldjbossVersion}_orig"
+mv $dest $src
+cd $cwd
+
+eclipselinkjar=`ls ${JBOSS_HOME}/modules/CMN_TP_LIB/main/eclipselink-*.jar`
+cwd2=`pwd`
+cd "${JBOSS_HOME}/modules/CMN_TP_LIB/main/"
+eclipselinkjar=`ls eclipselink-*.jar`
+cd $cwd2
+SED_TYPE=sed
+if [ "${CRM_DPLY}" = "EAR" ]
+then
+        CRMAPP="FinacleCRM.ear"
+else
+        CRMAPP="FinacleCRM.war"
+fi
+if [ ! -d "${JBOSS_HOME}/modules/org/jacorb/main" ]
+then
+        mkdir -p ${JBOSS_HOME}/modules/org/jacorb/main
+        ln -fs ${JBOSS_HOME}/modules/system/layers/base/org/jboss/as/jacorb/main/*.jar ${JBOSS_HOME}/modules/org/jacorb/main
+        cp ${JBOSS_HOME}/modules/system/layers/base/org/jboss/as/jacorb/main/module.xml ${JBOSS_HOME}/modules/org/jacorb/main
+        $SED_TYPE -i 's/name="org.jboss.as.jacorb"/name="org.jacorb"/g' ${JBOSS_HOME}/modules/org/jacorb/main/module.xml
+fi
+if [ ! -d "${JBOSS_HOME}/modules/org/hornetq/main" ]
+then
+        mkdir -p ${JBOSS_HOME}/modules/org/hornetq/main
+        ln -fs ${JBOSS_HOME}/modules/system/layers/base/org/hornetq/client/main/*.jar ${JBOSS_HOME}/modules/org/hornetq/main
+        cp ${JBOSS_HOME}/modules/system/layers/base/org/hornetq/client/main/module.xml ${JBOSS_HOME}/modules/org/hornetq/main
+        $SED_TYPE -i 's/name="org.hornetq.client"/name="org.hornetq"/g' ${JBOSS_HOME}/modules/org/hornetq/main/module.xml
+fi
+if [ "${newjbossver}" -ge 730 ]
+then
+        if [ ! -d "${JBOSS_HOME}/modules/org/jdom/main" ]
+        then
+                cwdnew=`pwd`
+                mkdir -p "${JBOSS_HOME}/modules/org/jdom/main"
+                cd "${JBOSS_HOME}/modules/CMN_TP_LIB/main"
+                jdomjar=`ls jdom-*jar`
+                cd "${JBOSS_HOME}/modules/org/jdom/main"
+                ln -fs "${JBOSS_HOME}/modules/CMN_TP_LIB/main/${jdomjar}" "${JBOSS_HOME}/modules/org/jdom/main"
+                echo '<module name="org.jdom" xmlns="urn:jboss:module:1.5">
+                <properties>
+                <property name="jboss.api" value="unsupported"/>
+                </properties>
+                <dependencies>
+                <module name="org.jaxen"/>
+                <module name="javax.api"/>
+                </dependencies>
+                <resources>
+                <resource-root path="'${jdomjar}'"/>
+                </resources>
+                </module>' > module.xml
+                cd $cwdnew
+        fi
+fi
+if [ -f "${JBOSS_HOME}/modules/CMN_TP_LIB/main/module.xml" ]
+then
+        if [  -f "${JBOSS_HOME}/modules/CMN_TP_LIB/main/${eclipselinkjar}" ]
+        then
+                if [ ! -f "${JBOSS_HOME}/modules/system/layers/base/org/eclipse/persistence/main/${eclipselinkjar}" ]
+                then
+                        cp ${JBOSS_HOME}/modules/CMN_TP_LIB/main/${eclipselinkjar} ${JBOSS_HOME}/modules/system/layers/base/org/eclipse/persistence/main
+                        $SED_TYPE -i '/<resource-root path=/a\        <resource-root path=\"'${eclipselinkjar}'\">\
+                <filter>\
+                        <exclude path=\"javax\/\*\*\" />\
+                </filter>\
+                <\/resource-root>' ${JBOSS_HOME}/modules/system/layers/base/org/eclipse/persistence/main/module.xml
+                fi
+                if [ -d "${JBOSS_HOME}/modules/system/layers/base/.overlays" ]
+                then
+                        if [ ! -f "${JBOSS_HOME}/modules/system/layers/base/.overlays/layer-base-jboss-eap-${jbossVersion}.CP/org/eclipse/persistence/main/${eclipselinkjar}" ]
+                        then
+                                cp ${JBOSS_HOME}/modules/CMN_TP_LIB/main/${eclipselinkjar} ${JBOSS_HOME}/modules/system/layers/base/.overlays/layer-base-jboss-eap-${jbossVersion}.CP/org/eclipse/persistence/main
+                                $SED_TYPE -i '/<resource-root path=/a\        <resource-root path=\"'${eclipselinkjar}'\">\
+                <filter>\
+                        <exclude path=\"javax\/\*\*\" />\
+                </filter>\
+                        <\/resource-root>' ${JBOSS_HOME}/modules/system/layers/base/.overlays/layer-base-jboss-eap-${jbossVersion}.CP/org/eclipse/persistence/main/module.xml
+                        fi
+                fi
+        fi
+fi
+cp $fedir/common/config/install/fdm_inputs.cfg $fedir/common/config/install/fdm_inputs.cfg_"${oldjbossVersion}_orig"
+jbossVersionNew=`echo "$jbossVersion" | tr -d "."`
+sed -i 's/JBOSS_VERSION='$JBOSS_VERSION'/JBOSS_VERSION='$jbossVersionNew'/' $fedir/common/config/install/fdm_inputs.cfg
