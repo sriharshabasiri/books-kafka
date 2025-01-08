@@ -1,14 +1,11 @@
-filter(
-    outputs('List_rows_present_in_a_table')?['body/value'], 
-    and(
-        equals(item()?['Day'], formatDateTime(utcNow(), 'dddd')),
-        greaterOrEquals(
-            div(ticks(utcNow()) - ticks('1899-12-30T00:00:00Z'), 864000000000),
-            float(item()?['FromTime'])
-        ),
-        lessOrEquals(
-            div(ticks(utcNow()) - ticks('1899-12-30T00:00:00Z'), 864000000000),
-            float(item()?['ToTime'])
-        )
+and(
+    equals(item()?['Day'], formatDateTime(utcNow(), 'dddd')),
+    greaterOrEquals(
+        div(sub(ticks(utcNow()), ticks('1899-12-30T00:00:00Z')), 864000000000),
+        float(item()?['FromTime'])
+    ),
+    lessOrEquals(
+        div(sub(ticks(utcNow()), ticks('1899-12-30T00:00:00Z')), 864000000000),
+        float(item()?['ToTime'])
     )
 )
