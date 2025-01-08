@@ -1,15 +1,14 @@
-
-
-and(
-    equals(item()?['DayOfWeek'], outputs('Compose')), 
-    or(
-        and(
-            greaterOrEquals(outputs('Compose_2'), item()?['FromTime']),
-            lessOrEquals(outputs('Compose_2'), item()?['ToTime'])
+filter(
+    outputs('List_rows_present_in_a_table')?['body/value'], 
+    and(
+        equals(item()?['Day'], formatDateTime(utcNow(), 'dddd')),
+        greaterOrEquals(
+            div(ticks(utcNow()) - ticks('1899-12-30T00:00:00Z'), 864000000000),
+            float(item()?['FromTime'])
         ),
-        and(
-            greaterOrEquals(outputs('Compose_2'), item()?['FromTime']),
-            lessOrEquals('00:00', item()?['ToTime'])
+        lessOrEquals(
+            div(ticks(utcNow()) - ticks('1899-12-30T00:00:00Z'), 864000000000),
+            float(item()?['ToTime'])
         )
     )
 )
