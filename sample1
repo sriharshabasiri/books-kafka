@@ -1,1 +1,15 @@
 
+
+and(
+    equals(item()?['DayOfWeek'], outputs('Compose')), 
+    or(
+        and(
+            greaterOrEquals(outputs('Compose_2'), item()?['FromTime']),
+            lessOrEquals(outputs('Compose_2'), item()?['ToTime'])
+        ),
+        and(
+            greaterOrEquals(outputs('Compose_2'), item()?['FromTime']),
+            lessOrEquals('00:00', item()?['ToTime'])
+        )
+    )
+)
