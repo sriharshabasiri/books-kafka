@@ -1,6 +1,6 @@
 add(
-    div(hour(utcNow()), 24),
-    div(minute(utcNow()), 1440),
-    div(second(utcNow()), 86400),
-    div(millisecond(utcNow()) * 1000000, 86400000000)
+    div(hour(convertTimeZone(utcNow(), 'UTC', 'Central Standard Time')), 24),
+    div(minute(convertTimeZone(utcNow(), 'UTC', 'Central Standard Time')), 1440),
+    div(second(convertTimeZone(utcNow(), 'UTC', 'Central Standard Time')), 86400),
+    div(millisecond(convertTimeZone(utcNow(), 'UTC', 'Central Standard Time')) * 1000000, 86400000000)
 )
