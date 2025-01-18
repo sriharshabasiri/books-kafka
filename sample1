@@ -1,6 +1,17 @@
-add(
-    div(hour(convertTimeZone(utcNow(), 'UTC', 'Central Standard Time')), 24),
-    div(minute(convertTimeZone(utcNow(), 'UTC', 'Central Standard Time')), 1440),
-    div(second(convertTimeZone(utcNow(), 'UTC', 'Central Standard Time')), 86400),
-    div(millisecond(convertTimeZone(utcNow(), 'UTC', 'Central Standard Time')) * 1000000, 86400000000)
-)
+SELECT 
+    AVG(CASE 
+            WHEN TRUNC(SYSDATE) - TRUNC("TIMESTAMP_COLUMN") <= 7 THEN "LICENSE_COUNT_COLUMN"
+         END) AS avg_last_week,
+    AVG(CASE 
+            WHEN TRUNC(SYSDATE) - TRUNC("TIMESTAMP_COLUMN") <= 30 THEN "LICENSE_COUNT_COLUMN"
+         END) AS avg_last_month,
+    AVG(CASE 
+            WHEN TRUNC(SYSDATE) - TRUNC("TIMESTAMP_COLUMN") <= 182 THEN "LICENSE_COUNT_COLUMN"
+         END) AS avg_last_6_months,
+    AVG(CASE 
+            WHEN TRUNC(SYSDATE) - TRUNC("TIMESTAMP_COLUMN") <= 365 THEN "LICENSE_COUNT_COLUMN"
+         END) AS avg_last_year
+FROM 
+    LICENSE_CONSUMPTION_TABLE
+WHERE 
+    "TIMESTAMP_COLUMN" >= ADD_MONTHS(SYSDATE, -12);
