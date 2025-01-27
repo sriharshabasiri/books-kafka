@@ -1,1 +1,27 @@
-avg:api.response.time{*} by {api_name}.rollup(avg, 86400).as_count().timeshift(1d), avg:api.response.time{*} by {api_name}.rollup(avg, 86400).as_count()
+-- Query to list all tables with row counts
+SELECT 
+    owner AS schema_name, 
+    table_name, 
+    (SELECT COUNT(*) FROM all_tables.owner || '.' || all_tables.table_name) AS row_count
+FROM all_tables
+WHERE owner NOT IN ('SYS', 'SYSTEM');
+
+-- Query to list all sequences
+SELECT 
+    sequence_owner AS schema_name, 
+    sequence_name 
+FROM all_sequences;
+
+-- Query to list all triggers
+SELECT 
+    owner AS trigger_schema,
+    trigger_name, 
+    table_name
+FROM all_triggers;
+
+-- Query to list all stored procedures
+SELECT 
+    owner AS procedure_schema,
+    object_name AS procedure_name
+FROM all_objects
+WHERE object_type = 'PROCEDURE';
