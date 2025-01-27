@@ -1,27 +1,20 @@
--- Query to list all tables with row counts
-SELECT 
-    owner AS schema_name, 
-    table_name, 
-    (SELECT COUNT(*) FROM all_tables.owner || '.' || all_tables.table_name) AS row_count
-FROM all_tables
-WHERE owner NOT IN ('SYS', 'SYSTEM');
-
--- Query to list all sequences
-SELECT 
-    sequence_owner AS schema_name, 
-    sequence_name 
-FROM all_sequences;
-
--- Query to list all triggers
-SELECT 
-    owner AS trigger_schema,
-    trigger_name, 
-    table_name
-FROM all_triggers;
-
--- Query to list all stored procedures
-SELECT 
-    owner AS procedure_schema,
-    object_name AS procedure_name
-FROM all_objects
-WHERE object_type = 'PROCEDURE';
+DECLARE
+    v_sql      VARCHAR2(4000);
+    v_rowcount NUMBER;
+BEGIN
+    FOR t IN (
+        SELECT owner AS schema_name, table_name 
+        FROM all_tables 
+        WHERE owner NOT IN ('SYS', 'SYSTEM')
+    ) LOOP
+        -- Dynamically generate and execute the count query
+        v_sql := 'SELECT COUNT(*) FROM ' || t.schema_name || '.' || t.table_name;
+        EXECUTE IMMEDIATE v_sql INTO v_rowcount;
+        
+        -- Output the result
+        DBMS_OUTPUT.PUT_LINE('Schema: ' || t.schema_name || 
+                             ', Table: ' || t.table_name || 
+                             ', Row Count: ' || v_rowcount);
+    END LOOP;
+END;
+/
