@@ -14,7 +14,12 @@ BEGIN
         SELECT COUNT(*) 
         INTO v_table_count
         FROM all_tables
-        WHERE owner = schema_rec.schema_name;
+        WHERE owner = schema_rec.schema_name
+          AND table_name NOT IN (
+              SELECT table_name
+              FROM all_indexes
+              WHERE index_type = 'IOT - TOP'
+          );
 
         DBMS_OUTPUT.PUT_LINE('Schema: ' || schema_rec.schema_name || ', Total Tables: ' || v_table_count);
 
@@ -23,13 +28,21 @@ BEGIN
             SELECT table_name 
             FROM all_tables 
             WHERE owner = schema_rec.schema_name
+              AND table_name NOT IN (
+                  SELECT table_name
+                  FROM all_indexes
+                  WHERE index_type = 'IOT - TOP'
+              )
         ) LOOP
             -- Dynamically generate and execute the row count query
             v_sql := 'SELECT COUNT(*) FROM ' || schema_rec.schema_name || '.' || table_rec.table_name;
-            EXECUTE IMMEDIATE v_sql INTO v_rowcount;
-
-            -- Output the row count for the table
-            DBMS_OUTPUT.PUT_LINE('    Table: ' || table_rec.table_name || ', Row Count: ' || v_rowcount);
+            BEGIN
+                EXECUTE IMMEDIATE v_sql INTO v_rowcount;
+                DBMS_OUTPUT.PUT_LINE('    Table: ' || table_rec.table_name || ', Row Count: ' || v_rowcount);
+            EXCEPTION
+                WHEN OTHERS THEN
+                    DBMS_OUTPUT.PUT_LINE('    Table: ' || table_rec.table_name || ' - Error encountered: ' || SQLERRM);
+            END;
         END LOOP;
     END LOOP;
 END;
