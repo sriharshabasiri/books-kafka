@@ -1,20 +1,36 @@
 DECLARE
-    v_sql      VARCHAR2(4000);
-    v_rowcount NUMBER;
+    v_sql         VARCHAR2(4000);
+    v_rowcount    NUMBER;
+    v_table_count NUMBER;
 BEGIN
-    FOR t IN (
-        SELECT owner AS schema_name, table_name 
+    -- Loop through each schema
+    FOR schema_rec IN (
+        SELECT owner AS schema_name 
         FROM all_tables 
         WHERE owner NOT IN ('SYS', 'SYSTEM')
+        GROUP BY owner
     ) LOOP
-        -- Dynamically generate and execute the count query
-        v_sql := 'SELECT COUNT(*) FROM ' || t.schema_name || '.' || t.table_name;
-        EXECUTE IMMEDIATE v_sql INTO v_rowcount;
-        
-        -- Output the result
-        DBMS_OUTPUT.PUT_LINE('Schema: ' || t.schema_name || 
-                             ', Table: ' || t.table_name || 
-                             ', Row Count: ' || v_rowcount);
+        -- Count the number of tables in the schema
+        SELECT COUNT(*) 
+        INTO v_table_count
+        FROM all_tables
+        WHERE owner = schema_rec.schema_name;
+
+        DBMS_OUTPUT.PUT_LINE('Schema: ' || schema_rec.schema_name || ', Total Tables: ' || v_table_count);
+
+        -- Loop through each table in the schema
+        FOR table_rec IN (
+            SELECT table_name 
+            FROM all_tables 
+            WHERE owner = schema_rec.schema_name
+        ) LOOP
+            -- Dynamically generate and execute the row count query
+            v_sql := 'SELECT COUNT(*) FROM ' || schema_rec.schema_name || '.' || table_rec.table_name;
+            EXECUTE IMMEDIATE v_sql INTO v_rowcount;
+
+            -- Output the row count for the table
+            DBMS_OUTPUT.PUT_LINE('    Table: ' || table_rec.table_name || ', Row Count: ' || v_rowcount);
+        END LOOP;
     END LOOP;
 END;
 /
