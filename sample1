@@ -1,9 +1,2 @@
-SELECT 
-    table_name,
-    num_rows AS row_count
-FROM 
-    all_tables
-WHERE 
-    owner = 'YOUR_SCHEMA_NAME'
-ORDER BY 
-    table_name;
+./jboss-cli.sh --connect
+/subsystem=undertow:read-resource(include-runtime=true)
