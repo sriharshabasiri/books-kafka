@@ -1,2 +1,49 @@
-./jboss-cli.sh --connect
-/subsystem=undertow:read-resource(include-runtime=true)
+import subprocess
+import json
+import re
+from datadog import initialize, statsd
+
+# Datadog StatsD Configuration
+options = {"statsd_host": "127.0.0.1", "statsd_port": 8125}
+initialize(**options)
+
+def execute_sh_script(script_path):
+    """Runs the shell script and captures its output."""
+    try:
+        result = subprocess.run(
+            [script_path], capture_output=True, text=True, check=True
+        )
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing script: {e}")
+        return None
+
+def parse_output(output):
+    """Parses the shell output into a dictionary."""
+    # Convert `=>` to `:` for valid JSON format
+    json_output = re.sub(r"=>", ":", output)
+
+    try:
+        data = json.loads(json_output)
+        return data.get("result", {})
+    except json.JSONDecodeError as e:
+        print(f"JSON parsing error: {e}")
+        return {}
+
+def send_to_datadog(data):
+    """Sends parsed topology data to Datadog StatsD."""
+    for node_id, address in data.items():
+        ip_port = address.split("/")[-1]  # Extract "10.20.45.98:4447"
+        ip, port = ip_port.split(":")
+
+        # Send as a gauge metric with relevant tags
+        statsd.gauge("custom.activemq.topology", 1, tags=[f"node_id:{node_id}", f"host:{ip}", f"port:{port}"])
+        print(f"Sent metric: custom.activemq.topology | node_id:{node_id} | host:{ip} | port:{port}")
+
+if __name__ == "__main__":
+    script_path = "/path/to/your/topology_script.sh"  # Update this with your actual script path
+    output = execute_sh_script(script_path)
+
+    if output:
+        parsed_data = parse_output(output)
+        send_to_datadog(parsed_data)
