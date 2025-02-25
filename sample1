@@ -1,18 +1,1 @@
 
-    # Check if the data is a dictionary and contains a 'result' key
-    if isinstance(data, dict) and 'result' in data:
-        data = data['result']
-    
-    # Check if the data is a list of dictionaries
-    if isinstance(data, list) and all(isinstance(item, dict) for item in data):
-        # Convert JSON data to a pandas DataFrame
-        df = pd.DataFrame(data)
-        
-        # Print the DataFrame to inspect its structure
-        print("DataFrame Structure:")
-        print(df)
-        
-        return df
-    else:
-        print("Unexpected data format. Expected a list of dictionaries.")
-        return None
