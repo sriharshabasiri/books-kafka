@@ -1,1 +1,4 @@
-
+        eastern = pytz.timezone('US/Eastern')
+        for time_field in ["Start Time (ET)", "End Time (ET)"]:
+            if time_field in df.columns:
+                df[time_field] = pd.to_datetime(df[time_field], utc=True).dt.tz_convert(eastern).dt.strftime('%Y-%m-%d %H:%M:%S')
