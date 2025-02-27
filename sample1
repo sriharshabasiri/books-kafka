@@ -1,4 +1,8 @@
-        eastern = pytz.timezone('US/Eastern')
-        for time_field in ["Start Time (ET)", "End Time (ET)"]:
-            if time_field in df.columns:
-                df[time_field] = pd.to_datetime(df[time_field], utc=True).dt.tz_convert(eastern).dt.strftime('%Y-%m-%d %H:%M:%S')
+        if "Change Number" in df.columns and "Sys ID" in df.columns:
+            df["Change Number"] = df.apply(
+                lambda row: f'<a href="https://{SN_INSTANCE}/nav_to.do?uri=change_request.do?sys_id={row["Sys ID"]}">{row["Change Number"]}</a>',
+                axis=1
+            )
+        
+        # Drop the Sys ID column (not needed in the final output)
+        df = df.drop(columns=["Sys ID"])
