@@ -1,8 +1,1 @@
-        if "Change Number" in df.columns and "Sys ID" in df.columns:
-            df["Change Number"] = df.apply(
-                lambda row: f'<a href="https://{SN_INSTANCE}/nav_to.do?uri=change_request.do?sys_id={row["Sys ID"]}">{row["Change Number"]}</a>',
-                axis=1
-            )
-        
-        # Drop the Sys ID column (not needed in the final output)
-        df = df.drop(columns=["Sys ID"])
+
