@@ -1,1 +1,33 @@
 
+def is_jboss_running():
+    """
+    Check if JBoss EAP is running using the JBoss CLI.
+    """
+    try:
+        # Run the JBoss CLI command to check the server state
+        result = subprocess.run(
+            ['/path/to/jboss-eap/bin/jboss-cli.sh', '--connect', '--command=:read-attribute(name=server-state)'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        # Check for errors
+        if result.returncode != 0:
+            print(f"JBoss CLI error: {result.stderr}")
+            return False
+
+        # Check the output for the server state
+        if '"result" => "running"' in result.stdout:
+            print("JBoss is running.")
+            return True
+        else:
+            print("JBoss is NOT running.")
+            return False
+
+    except FileNotFoundError:
+        print("JBoss CLI not found. Ensure the path is correct.")
+        return False
+    except Exception as e:
+        print(f"Error checking JBoss state: {e}")
+        return False
