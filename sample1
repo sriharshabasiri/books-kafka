@@ -1,41 +1,75 @@
-import requests
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-import json
+import React, { useState } from 'react';
+import axios from 'axios';
 
-AAP_URL = 'https://your-aap-server/api/v2'
-AAP_TOKEN = 'your_aap_api_token'
+function App() {
+  const [environment, setEnvironment] = useState('');
+  const [action, setAction] = useState('');
+  const [status, setStatus] = useState('');
 
-@csrf_exempt
-def execute_action(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            environment = data.get('environment')
-            action = data.get('action')
+  const environments = [
+    'dev1', 'dev2', 'dev3', 'dev4', 'dev5', 'dev6', 'dev7', 'dev8', 'dev9', 'dev10', 
+    'performance', 'ESQM'
+  ];
 
-            if not environment or not action:
-                return JsonResponse({'status': 'Environment and action are required.'}, status=400)
+  const handleAction = async (actionType) => {
+    if (!environment) {
+      alert('Please select an environment.');
+      return;
+    }
 
-            # Map action to job template ID
-            job_template_id = 'start_template_id' if action == 'start' else 'stop_template_id'
+    try {
+      const response = await axios.post('http://localhost:8000/api/execute/', {
+        environment,
+        action: actionType
+      });
+      setStatus(response.data.status);
+    } catch (error) {
+      setStatus('Error: Failed to execute action.');
+      console.error(error);
+    }
+  };
 
-            # Trigger AAP job
-            response = requests.post(
-                f'{AAP_URL}/job_templates/{job_template_id}/launch/',
-                json={'extra_vars': {'environment': environment}},
-                headers={
-                    'Authorization': f'Bearer {AAP_TOKEN}',
-                    'Content-Type': 'application/json',
-                }
-            )
+  return (
+    <div className="App">
+      <h1>Service Management Portal</h1>
+      <div>
+        <label>Select Environment: </label>
+        <select value={environment} onChange={(e) => setEnvironment(e.target.value)}>
+          <option value="">--Select--</option>
+          {environments.map((env, index) => (
+            <option key={index} value={env}>{env}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <button onClick={() => handleAction('start')}>Start Services</button>
+        <button onClick={() => handleAction('stop')}>Stop Services</button>
+      </div>
+      <div>
+        <h3>Status: {status}</h3>
+      </div>
+    </div>
+  );
+}
 
-            if response.status_code != 201:
-                return JsonResponse({'status': f'Failed to trigger job. Error: {response.text}'}, status=500)
+export default App;
 
-            return JsonResponse({'status': f'Job triggered successfully. Job ID: {response.json().get("id")}'})
 
-        except Exception as e:
-            return JsonResponse({'status': f'Error: {str(e)}'}, status=500)
 
-    return JsonResponse({'status': 'Invalid request method.'}, status=405)
+const handleAction = async (actionType) => {
+  if (!environment) {
+    alert('Please select an environment.');
+    return;
+  }
+
+  try {
+    const response = await axios.post('http://localhost:8000/api/execute/', {
+      environment,
+      action: actionType,
+    });
+    setStatus(response.data.status);
+  } catch (error) {
+    setStatus('Error: Failed to execute action.');
+    console.error(error);
+  }
+};
