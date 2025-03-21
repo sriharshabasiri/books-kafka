@@ -1,1 +1,41 @@
+import requests
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
 
+AAP_URL = 'https://your-aap-server/api/v2'
+AAP_TOKEN = 'your_aap_api_token'
+
+@csrf_exempt
+def execute_action(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            environment = data.get('environment')
+            action = data.get('action')
+
+            if not environment or not action:
+                return JsonResponse({'status': 'Environment and action are required.'}, status=400)
+
+            # Map action to job template ID
+            job_template_id = 'start_template_id' if action == 'start' else 'stop_template_id'
+
+            # Trigger AAP job
+            response = requests.post(
+                f'{AAP_URL}/job_templates/{job_template_id}/launch/',
+                json={'extra_vars': {'environment': environment}},
+                headers={
+                    'Authorization': f'Bearer {AAP_TOKEN}',
+                    'Content-Type': 'application/json',
+                }
+            )
+
+            if response.status_code != 201:
+                return JsonResponse({'status': f'Failed to trigger job. Error: {response.text}'}, status=500)
+
+            return JsonResponse({'status': f'Job triggered successfully. Job ID: {response.json().get("id")}'})
+
+        except Exception as e:
+            return JsonResponse({'status': f'Error: {str(e)}'}, status=500)
+
+    return JsonResponse({'status': 'Invalid request method.'}, status=405)
