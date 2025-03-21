@@ -44,12 +44,15 @@ const ServiceManager = () => {
     }
 
     try {
+      // Call Django API
       const response = await axios.post('http://localhost:8000/api/execute/', {
         category,
         environment,
         action,
       });
-      setStatus(response.data.status);
+
+      // Update status based on the response
+      setStatus(response.data.status || 'Action executed successfully.');
     } catch (error) {
       setStatus('Error: Failed to execute action.');
       console.error(error);
@@ -107,47 +110,3 @@ const ServiceManager = () => {
 };
 
 export default ServiceManager;
-
-
-.service-manager {
-  margin: 20px;
-  padding: 20px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  background-color: #f9f9f9;
-}
-
-.service-manager h2 {
-  margin-bottom: 20px;
-}
-
-.service-manager label {
-  font-weight: bold;
-  margin-right: 10px;
-}
-
-.service-manager select {
-  margin: 10px 0;
-  padding: 5px;
-  border-radius: 4px;
-  width: 200px;
-}
-
-.service-manager button {
-  margin: 10px 0;
-  padding: 10px 20px;
-  background-color: #007bff;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.service-manager button:hover {
-  background-color: #0056b3;
-}
-
-.service-manager h3 {
-  margin-top: 20px;
-  color: #333;
-}
