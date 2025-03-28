@@ -1,1 +1,23 @@
+    // Poll every 5 seconds until completion
+    const interval = setInterval(async () => {
+      const result = await checkStatus();
+      if (result.status === 'completed' || result.status === 'failed') {
+        clearInterval(interval);
+        setStatus(`Job ${jobId} ${result.status}. Output: ${result.output}`);
+      }
+    }, 5000);
 
+  } catch (error) {
+    setStatus(`Error: ${error.response?.data?.message || error.message}`);
+
+
+@csrf_exempt
+def job_status(request, job_id):
+    try:
+        aap_response = requests.get(
+            f'{AAP_URL}/jobs/{job_id}/',
+            headers={'Authorization': f'Bearer {AAP_TOKEN}'}
+        )
+        return JsonResponse(aap_response.json())
+    except Exception as e:
+        return JsonResponse({'status': str(e)}, status=500)
