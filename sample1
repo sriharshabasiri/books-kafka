@@ -1,23 +1,91 @@
-    // Poll every 5 seconds until completion
-    const interval = setInterval(async () => {
-      const result = await checkStatus();
-      if (result.status === 'completed' || result.status === 'failed') {
-        clearInterval(interval);
-        setStatus(`Job ${jobId} ${result.status}. Output: ${result.output}`);
-      }
-    }, 5000);
+import requests
+from django.http import StreamingHttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
-  } catch (error) {
-    setStatus(`Error: ${error.response?.data?.message || error.message}`);
-
+AAP_URL = "https://your-aap-server"
+AAP_TOKEN = "your_token"
 
 @csrf_exempt
-def job_status(request, job_id):
-    try:
-        aap_response = requests.get(
-            f'{AAP_URL}/jobs/{job_id}/',
-            headers={'Authorization': f'Bearer {AAP_TOKEN}'}
-        )
-        return JsonResponse(aap_response.json())
-    except Exception as e:
-        return JsonResponse({'status': str(e)}, status=500)
+@require_POST
+def launch_job(request):
+    # Trigger the AAP job
+    job = requests.post(
+        f"{AAP_URL}/api/v2/job_templates/42/launch/",
+        headers={"Authorization": f"Bearer {AAP_TOKEN}"}
+    ).json()
+    
+    return JsonResponse({"job_id": job["id"]}, status=202)
+
+def stream_job_events(request, job_id):
+    def event_stream():
+        url = f"{AAP_URL}/api/v2/jobs/{job_id}/job_events/"
+        headers = {"Authorization": f"Bearer {AAP_TOKEN}"}
+        
+        while True:
+            events = requests.get(url, headers=headers).json()
+            for event in events["results"]:
+                yield f"data: {json.dumps(event)}\n\n"
+            
+            if events.get("next"):
+                url = events["next"]
+            else:
+                yield "data: {\"status\": \"complete\"}\n\n"
+                break
+
+    return StreamingHttpResponse(
+        event_stream(),
+        content_type="text/event-stream"
+    )
+
+
+
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('api/launch/', views.launch_job),
+    path('api/jobs/<int:job_id>/events/', views.stream_job_events),
+]
+
+
+import { useState, useEffect } from 'react';
+
+export default function JobController() {
+  const [output, setOutput] = useState([]);
+  const [jobId, setJobId] = useState(null);
+
+  const startJob = async () => {
+    const res = await fetch('/api/launch/', { method: 'POST' });
+    const { job_id } = await res.json();
+    setJobId(job_id);
+  };
+
+  useEffect(() => {
+    if (!jobId) return;
+
+    const eventSource = new EventSource(`/api/jobs/${jobId}/events/`);
+    
+    eventSource.onmessage = (e) => {
+      const event = JSON.parse(e.data);
+      setOutput(prev => [...prev, event]);
+      
+      if (event.status === 'complete') {
+        eventSource.close();
+      }
+    };
+
+    return () => eventSource.close();
+  }, [jobId]);
+
+  return (
+    <div>
+      <button onClick={startJob}>Run Playbook</button>
+      <div className="output">
+        {output.map((event, i) => (
+          <pre key={i}>{JSON.stringify(event, null, 2)}</pre>
+        ))}
+      </div>
+    </div>
+  );
+}
