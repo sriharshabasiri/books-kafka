@@ -1,79 +1,21 @@
-@csrf_exempt
-def stream_job_events(request, job_id):
-    def event_stream():
-        base_url = get_aap_base_url()
-        events_url = f"{base_url}/api/v2/jobs/{job_id}/job_events/"
-        job_url = f"{base_url}/api/v2/jobs/{job_id}/"
-        headers = {"Authorization": f"Bearer {settings.AAP_TOKEN}"}
-        
-        MAX_RETRIES = 3
-        retry_count = 0
-        job_initialized = False
+def get_job_status(job_data):
+    """Robust status detection from multiple fields"""
+    if job_data.get('finished'):
+        return job_data.get('status', 'unknown')
+    
+    if job_data.get('failed'):
+        return 'failed'
+    
+    summary = job_data.get('summary_fields', {})
+    if summary.get('job_events', {}).get('failed', 0) > 0:
+        return 'failed'
+    
+    if summary.get('job_events', {}).get('changed', 0) > 0:
+        return 'running'
+    
+    return job_data.get('status', 'pending')  # Default fallback
 
-        while True:
-            try:
-                # 1. Check job status first
-                job_resp = requests.get(job_url, headers=headers, timeout=10)
-                job_resp.raise_for_status()
-                job_data = job_resp.json()
-                current_status = job_data.get('status', 'unknown')
 
-                # 2. Handle all possible statuses
-                if current_status in ['successful', 'failed', 'error', 'canceled']:
-                    yield f"data: {json.dumps({
-                        'type': 'job_status',
-                        'status': 'complete',
-                        'job_status': current_status
-                    })}\n\n"
-                    break
 
-                elif current_status == 'running':
-                    job_initialized = True
-                    # 3. Only fetch events if job is running
-                    events_resp = requests.get(events_url, headers=headers, timeout=10)
-                    events_resp.raise_for_status()
-                    events_data = events_resp.json()
-
-                    # 4. Process events if available
-                    if events_data.get('results'):
-                        for event in events_data['results']:
-                            yield f"data: {json.dumps({
-                                'type': 'job_event',
-                                'event_data': {
-                                    'event': event.get('event'),
-                                    'task': event.get('task'),
-                                    'stdout': event.get('stdout'),
-                                    'counter': event.get('counter')
-                                }
-                            })}\n\n"
-                        events_url = events_data.get('next', events_url)  # Handle pagination
-                        retry_count = 0  # Reset retries on successful fetch
-                    else:
-                        retry_count += 1
-
-                # 5. Handle pending/unknown status
-                elif not job_initialized:
-                    yield f"data: {json.dumps({
-                        'type': 'job_status',
-                        'status': 'pending',
-                        'message': 'Job is initializing...'
-                    })}\n\n"
-
-                # 6. Retry or timeout logic
-                if retry_count >= MAX_RETRIES:
-                    yield f"data: {json.dumps({
-                        'type': 'error',
-                        'error': 'Max retries reached. Job may be stalled.'
-                    })}\n\n"
-                    break
-
-                time.sleep(2)  # Polling interval
-
-            except requests.exceptions.RequestException as e:
-                yield f"data: {json.dumps({
-                    'type': 'error',
-                    'error': f'AAP API error: {str(e)}'
-                })}\n\n"
-                break
-
-    return StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+         # Use robust status detection
+                current_status = get_job_status(job_data)
