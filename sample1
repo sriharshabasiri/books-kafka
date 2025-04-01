@@ -1,1 +1,90 @@
+from django.http import StreamingHttpResponse, JsonResponse
+import requests
+import json
+import time
+from django.views.decorators.csrf import csrf_exempt
 
+AAP_URL = "https://your-aap-server"
+AAP_TOKEN = "your_token"
+POLL_INTERVAL = 2  # seconds
+
+@csrf_exempt
+def stream_job_events(request, job_id):
+    def event_stream():
+        url = f"{AAP_URL}/api/v2/jobs/{job_id}/job_events/"
+        headers = {"Authorization": f"Bearer {AAP_TOKEN}"}
+        last_seen_event = None
+        seen_events = set()
+        
+        try:
+            while True:
+                try:
+                    response = requests.get(url, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    # Handle different AAP API response formats
+                    events = data.get('results', [])
+                    if not isinstance(events, list):
+                        yield f"data: {json.dumps({'error': 'Invalid events format'})}\n\n"
+                        break
+                    
+                    # Process new events
+                    new_events = [
+                        event for event in events 
+                        if event.get('id') not in seen_events
+                    ]
+                    
+                    for event in new_events:
+                        seen_events.add(event.get('id'))
+                        yield f"data: {json.dumps({
+                            'event_type': event.get('event'),
+                            'task': event.get('task'),
+                            'host': event.get('host', {}).get('name'),
+                            'stdout': event.get('stdout'),
+                            'counter': event.get('counter'),
+                            'total_tasks': len(events),
+                            'timestamp': event.get('created')
+                        })}\n\n"
+                        last_seen_event = event
+                    
+                    # Check for job completion
+                    job_status = requests.get(
+                        f"{AAP_URL}/api/v2/jobs/{job_id}/",
+                        headers=headers
+                    ).json().get('status')
+                    
+                    if job_status in ['successful', 'failed', 'error', 'canceled']:
+                        yield f"data: {json.dumps({
+                            'status': 'complete',
+                            'job_status': job_status,
+                            'final_event': last_seen_event
+                        })}\n\n"
+                        break
+                    
+                    # Handle pagination
+                    url = data.get('next')
+                    if not url:
+                        time.sleep(POLL_INTERVAL)
+                        continue
+                        
+                except requests.exceptions.RequestException as e:
+                    yield f"data: {json.dumps({
+                        'error': f"API request failed: {str(e)}"
+                    })}\n\n"
+                    break
+                except json.JSONDecodeError:
+                    yield f"data: {json.dumps({
+                        'error': 'Invalid JSON response from AAP'
+                    })}\n\n"
+                    break
+                
+        except Exception as e:
+            yield f"data: {json.dumps({
+                'error': f"Streaming failed: {str(e)}"
+            })}\n\n"
+
+    return StreamingHttpResponse(
+        event_stream(),
+        content_type="text/event-stream"
+    )
