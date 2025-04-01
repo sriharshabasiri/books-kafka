@@ -18,11 +18,11 @@
     # Input normalization
     normalized_start: "{{ (start_time | default('')) | regex_replace('\\s+', ' ') | trim }}"
     normalized_end: >-
-      {% if end_time and end_time != '' %}
+      {% if end_time and end_time != '' -%}
       {{ end_time | regex_replace('\\s+', ' ') | trim }}
-      {% else %}
+      {%- else -%}
       {{ (normalized_start | to_datetime('%Y-%m-%d %H:%M') + 3600 | strftime('%Y-%m-%d %H:%M') }}
-      {% endif %}
+      {%- endif %}
     
     output_dir: "/central/UUID_Check/{{ uuid }}"
     max_hours_range: 24
