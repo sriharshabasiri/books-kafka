@@ -1,66 +1,90 @@
 ---
-- name: Search logs by UUID and status
-  hosts: localhost
+- name: Search logs by UUID with environment-based targeting
+  hosts: "{{ environment }}_servers"  # Dynamic host group based on environment
   vars:
-    INSTR_PATH: "/opt/finacle/dfsapp/common/log/"
-    ERROR_PATHS:
-      - "/opt/finacle/dfsapp/common/log/finint/fcrmmb"
-      - "/opt/finacle/dfsapp/common/log/fsb/fsbwebservice"
-      - "/opt/finacle/dfsapp/common/log/finint/fcoremb"
-    OUTPUT_DIR: "/central/UUID_Check"
-  
-  tasks:
+    # Environment-specific log paths
+    log_paths:
+      dev:
+        instr_path: "/opt/finacle/dev/common/log/"
+        error_paths:
+          - "/opt/finacle/dev/common/log/finint/fcrmmb"
+          - "/opt/finacle/dev/common/log/fsb/fsbwebservice"
+      prod:
+        instr_path: "/opt/finacle/prod/common/log/"
+        error_paths:
+          - "/opt/finacle/prod/common/log/finint/fcrmmb"
+          - "/opt/finacle/prod/common/log/fsb/fsbwebservice"
+    
+    # Defaults
+    uuid: "{{ uuid | mandatory }}"
+    start_time: "{{ start_time | mandatory }}"
+    end_time: "{{ (end_time is defined) | ternary(end_time, (start_time | to_datetime('%Y-%m-%d %H:%M') + 3600) | strftime('%Y-%m-%d %H:%M')) }}"
+    max_time_range: 86400  # 1 day in seconds
+    output_dir: "/central/UUID_Check/{{ uuid }}"
+
+  pre_tasks:
+    - name: Validate time range
+      ansible.builtin.assert:
+        that:
+          - "(end_time | to_datetime('%Y-%m-%d %H:%M') - start_time | to_datetime('%Y-%m-%d %H:%M')).total_seconds() <= max_time_range"
+          - "end_time | to_datetime('%Y-%m-%d %H:%M') > start_time | to_datetime('%Y-%m-%d %H:%M')"
+        fail_msg: "Time range must be less than 24 hours and end time must be after start time"
+        success_msg: "Time range validated successfully"
+
+    - name: Set environment-specific paths
+      ansible.builtin.set_fact:
+        instr_path: "{{ log_paths[environment].instr_path }}"
+        error_paths: "{{ log_paths[environment].error_paths }}"
+      when: environment in log_paths
+
     - name: Create output directory
       ansible.builtin.file:
-        path: "{{ OUTPUT_DIR }}"
+        path: "{{ output_dir }}"
         state: directory
         mode: '0755'
 
-    - name: Search instrumentation logs for UUID
+  tasks:
+    - name: Search instrumentation logs for UUID in time range
       ansible.builtin.shell: |
         set -o pipefail
-        for i in {0..4}; do
-          c_time=$(date -d "{{ start_time }} $i minutes" +"%b%d%y %H:%M")
-          find {{ INSTR_PATH }} -name "instrumentation*.log*" -exec grep -i "{{ uuid }}" {} + | grep "$c_time" > {{ OUTPUT_DIR }}/result_uuid.txt
-          
-          status=$(cut -d , -f4 {{ OUTPUT_DIR }}/result_uuid.txt 2>/dev/null | head -1)
-          
+        search_start="{{ start_time | to_datetime('%Y-%m-%d %H:%M') | strftime('%b%d%y %H:%M') }}"
+        search_end="{{ end_time | to_datetime('%Y-%m-%d %H:%M') | strftime('%b%d%y %H:%M') }}"
+        
+        find {{ instr_path }} -name "instrumentation*.log*" -newermt "$search_start" ! -newermt "$search_end" \
+          -exec grep -li "{{ uuid }}" {} + | xargs grep -i "{{ uuid }}" > {{ output_dir }}/result_uuid.txt
+        
+        if [[ -s {{ output_dir }}/result_uuid.txt ]]; then
+          status=$(cut -d , -f4 {{ output_dir }}/result_uuid.txt | head -1)
           if [[ "$status" == "success" ]]; then
-            echo "Success case - found in instrumentation logs:"
-            cat {{ OUTPUT_DIR }}/result_uuid.txt
+            echo "SUCCESS: Found in instrumentation logs"
+            cat {{ output_dir }}/result_uuid.txt
             exit 0
           fi
-        done
+        fi
         exit 1
       register: uuid_search
       ignore_errors: yes
       args:
         executable: /bin/bash
 
-    - name: Search error logs if not found in instrumentation
+    - name: Search error logs if UUID not found in instrumentation logs
       when: uuid_search.failed
       block:
         - name: Search error logs in all paths
           ansible.builtin.shell: |
             set -o pipefail
-            err_time=$(date -d "{{ start_time }}" "+%Y-%m-%d %H:%M")
-            > {{ OUTPUT_DIR }}/result_uuid.txt
+            > {{ output_dir }}/error_result.txt
             
-            for path in {{ ERROR_PATHS | join(' ') }}; do
-              cd "$path"
-              error_file=$(grep -l -w "{{ uuid }}" ciErrorLog* 2>/dev/null | head -1)
-              
-              if [[ -n "$error_file" ]]; then
-                grep -A 15 -B5 "{{ uuid }}" "$error_file" | egrep -A 15 "$err_time" >> {{ OUTPUT_DIR }}/result_uuid.txt
-              fi
+            for path in {{ error_paths | join(' ') }}; do
+              find "$path" -name "ciErrorLog*" -newermt "{{ start_time }}" ! -newermt "{{ end_time }}" \
+                -exec grep -li "{{ uuid }}" {} + | xargs grep -A 15 -B5 "{{ uuid }}" >> {{ output_dir }}/error_result.txt
             done
             
-            if [[ -s {{ OUTPUT_DIR }}/result_uuid.txt ]]; then
-              echo "Found in error logs:"
-              cat {{ OUTPUT_DIR }}/result_uuid.txt
+            if [[ -s {{ output_dir }}/error_result.txt ]]; then
+              echo "ERROR: Found in error logs"
+              cat {{ output_dir }}/error_result.txt
               exit 0
             else
-              echo "UUID not found in any logs"
               exit 1
             fi
           register: error_search
@@ -72,7 +96,14 @@
             msg: "UUID {{ uuid }} not found in any logs between {{ start_time }} and {{ end_time }}"
           when: error_search.failed
 
+  post_tasks:
     - name: Display final results
       ansible.builtin.debug:
-        msg: "{{ lookup('file', OUTPUT_DIR + '/result_uuid.txt') }}"
+        msg: "{{ lookup('file', output_dir ~ '/result_uuid.txt') | default(lookup('file', output_dir ~ '/error_result.txt')) }}"
       when: not uuid_search.failed or not error_search.failed
+
+    - name: Clean up empty result files
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: absent
+      when: uuid_search.failed and error_search.failed
