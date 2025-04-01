@@ -1,1 +1,97 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import './ServiceManager.css';
 
+const ServiceManager = () => {
+  const [category, setCategory] = useState('');
+  const [environment, setEnvironment] = useState('');
+  const [action, setAction] = useState('');
+  const [status, setStatus] = useState('');
+  const [jobId, setJobId] = useState(null);
+  const [eventLog, setEventLog] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Environment categories and sub-environments
+  const environmentCategories = {
+    Dev: ['dev1', 'dev2'],
+    DM: ['dm1', 'dm2'],
+    PERF: ['perf1', 'perf2'],
+    ESQM: ['esqm1', 'esqm2'],
+  };
+
+  // Available actions
+  const actions = [
+    'Start Services',
+    'Stop Services',
+    'Check Logs',
+    'Check Status',
+  ];
+
+  const handleCategoryChange = (e) => {
+    setCategory(e.target.value);
+    setEnvironment('');
+    setEventLog([]);
+  };
+
+  const handleEnvironmentChange = (e) => {
+    setEnvironment(e.target.value);
+    setEventLog([]);
+  };
+
+  const handleActionChange = (e) => {
+    setAction(e.target.value);
+    setEventLog([]);
+  };
+
+  // Function to stream events from Django
+  const streamEvents = (jobId) => {
+    const eventSource = new EventSource(`http://localhost:8000/api/jobs/${jobId}/events/`);
+
+    eventSource.onmessage = (e) => {
+      const event = JSON.parse(e.data);
+      
+      if (event.status === 'complete') {
+        eventSource.close();
+        setIsLoading(false);
+        return;
+      }
+
+      setEventLog(prev => [...prev, event]);
+      setStatus(`Task ${event.counter}/${event.total_tasks}: ${event.task_name}`);
+    };
+
+    eventSource.onerror = () => {
+      eventSource.close();
+      setIsLoading(false);
+    };
+
+    return () => eventSource.close();
+  };
+
+  const handleExecute = async () => {
+    if (!category || !environment || !action) {
+      alert('Please select a category, environment, and action.');
+      return;
+    }
+
+    setIsLoading(true);
+    setEventLog([]);
+    setStatus('Initializing job...');
+
+    try {
+      // Start the job
+      const response = await axios.post('http://localhost:8000/api/execute/', {
+        category,
+        environment,
+        action,
+      });
+
+      setJobId(response.data.job_id);
+      setStatus(`Job ${response.data.job_id} started. Streaming events...`);
+      
+      // Start streaming events
+      streamEvents(response.data.job_id);
+
+    } catch (error) {
+      setIsLoading(false);
+      setStatus('Error
