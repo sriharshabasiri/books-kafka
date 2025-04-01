@@ -1,21 +1,78 @@
-def get_job_status(job_data):
-    """Robust status detection from multiple fields"""
-    if job_data.get('finished'):
-        return job_data.get('status', 'unknown')
-    
-    if job_data.get('failed'):
-        return 'failed'
-    
-    summary = job_data.get('summary_fields', {})
-    if summary.get('job_events', {}).get('failed', 0) > 0:
-        return 'failed'
-    
-    if summary.get('job_events', {}).get('changed', 0) > 0:
-        return 'running'
-    
-    return job_data.get('status', 'pending')  # Default fallback
+---
+- name: Search logs by UUID and status
+  hosts: localhost
+  vars:
+    INSTR_PATH: "/opt/finacle/dfsapp/common/log/"
+    ERROR_PATHS:
+      - "/opt/finacle/dfsapp/common/log/finint/fcrmmb"
+      - "/opt/finacle/dfsapp/common/log/fsb/fsbwebservice"
+      - "/opt/finacle/dfsapp/common/log/finint/fcoremb"
+    OUTPUT_DIR: "/central/UUID_Check"
+  
+  tasks:
+    - name: Create output directory
+      ansible.builtin.file:
+        path: "{{ OUTPUT_DIR }}"
+        state: directory
+        mode: '0755'
 
+    - name: Search instrumentation logs for UUID
+      ansible.builtin.shell: |
+        set -o pipefail
+        for i in {0..4}; do
+          c_time=$(date -d "{{ start_time }} $i minutes" +"%b%d%y %H:%M")
+          find {{ INSTR_PATH }} -name "instrumentation*.log*" -exec grep -i "{{ uuid }}" {} + | grep "$c_time" > {{ OUTPUT_DIR }}/result_uuid.txt
+          
+          status=$(cut -d , -f4 {{ OUTPUT_DIR }}/result_uuid.txt 2>/dev/null | head -1)
+          
+          if [[ "$status" == "success" ]]; then
+            echo "Success case - found in instrumentation logs:"
+            cat {{ OUTPUT_DIR }}/result_uuid.txt
+            exit 0
+          fi
+        done
+        exit 1
+      register: uuid_search
+      ignore_errors: yes
+      args:
+        executable: /bin/bash
 
+    - name: Search error logs if not found in instrumentation
+      when: uuid_search.failed
+      block:
+        - name: Search error logs in all paths
+          ansible.builtin.shell: |
+            set -o pipefail
+            err_time=$(date -d "{{ start_time }}" "+%Y-%m-%d %H:%M")
+            > {{ OUTPUT_DIR }}/result_uuid.txt
+            
+            for path in {{ ERROR_PATHS | join(' ') }}; do
+              cd "$path"
+              error_file=$(grep -l -w "{{ uuid }}" ciErrorLog* 2>/dev/null | head -1)
+              
+              if [[ -n "$error_file" ]]; then
+                grep -A 15 -B5 "{{ uuid }}" "$error_file" | egrep -A 15 "$err_time" >> {{ OUTPUT_DIR }}/result_uuid.txt
+              fi
+            done
+            
+            if [[ -s {{ OUTPUT_DIR }}/result_uuid.txt ]]; then
+              echo "Found in error logs:"
+              cat {{ OUTPUT_DIR }}/result_uuid.txt
+              exit 0
+            else
+              echo "UUID not found in any logs"
+              exit 1
+            fi
+          register: error_search
+          args:
+            executable: /bin/bash
 
-         # Use robust status detection
-                current_status = get_job_status(job_data)
+        - name: Fail if UUID not found anywhere
+          ansible.builtin.fail:
+            msg: "UUID {{ uuid }} not found in any logs between {{ start_time }} and {{ end_time }}"
+          when: error_search.failed
+
+    - name: Display final results
+      ansible.builtin.debug:
+        msg: "{{ lookup('file', OUTPUT_DIR + '/result_uuid.txt') }}"
+      when: not uuid_search.failed or not error_search.failed
