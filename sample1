@@ -1,90 +1,87 @@
-from django.http import StreamingHttpResponse, JsonResponse
-import requests
+# middleware.py
 import json
 import time
-from django.views.decorators.csrf import csrf_exempt
+from django.utils.deprecation import MiddlewareMixin
+from django.http import StreamingHttpResponse
 
-AAP_URL = "https://your-aap-server"
-AAP_TOKEN = "your_token"
-POLL_INTERVAL = 2  # seconds
+class RequestResponseLoggerMiddleware(MiddlewareMixin):
+    def process_request(self, request):
+        request._logging_start_time = time.time()
+        self._log_request(request)
+        return None
 
-@csrf_exempt
-def stream_job_events(request, job_id):
-    def event_stream():
-        url = f"{AAP_URL}/api/v2/jobs/{job_id}/job_events/"
-        headers = {"Authorization": f"Bearer {AAP_TOKEN}"}
-        last_seen_event = None
-        seen_events = set()
+    def process_response(self, request, response):
+        response_time = time.time() - request._logging_start_time
         
-        try:
-            while True:
-                try:
-                    response = requests.get(url, headers=headers, timeout=10)
-                    response.raise_for_status()
-                    data = response.json()
-                    
-                    # Handle different AAP API response formats
-                    events = data.get('results', [])
-                    if not isinstance(events, list):
-                        yield f"data: {json.dumps({'error': 'Invalid events format'})}\n\n"
-                        break
-                    
-                    # Process new events
-                    new_events = [
-                        event for event in events 
-                        if event.get('id') not in seen_events
-                    ]
-                    
-                    for event in new_events:
-                        seen_events.add(event.get('id'))
-                        yield f"data: {json.dumps({
-                            'event_type': event.get('event'),
-                            'task': event.get('task'),
-                            'host': event.get('host', {}).get('name'),
-                            'stdout': event.get('stdout'),
-                            'counter': event.get('counter'),
-                            'total_tasks': len(events),
-                            'timestamp': event.get('created')
-                        })}\n\n"
-                        last_seen_event = event
-                    
-                    # Check for job completion
-                    job_status = requests.get(
-                        f"{AAP_URL}/api/v2/jobs/{job_id}/",
-                        headers=headers
-                    ).json().get('status')
-                    
-                    if job_status in ['successful', 'failed', 'error', 'canceled']:
-                        yield f"data: {json.dumps({
-                            'status': 'complete',
-                            'job_status': job_status,
-                            'final_event': last_seen_event
-                        })}\n\n"
-                        break
-                    
-                    # Handle pagination
-                    url = data.get('next')
-                    if not url:
-                        time.sleep(POLL_INTERVAL)
-                        continue
-                        
-                except requests.exceptions.RequestException as e:
-                    yield f"data: {json.dumps({
-                        'error': f"API request failed: {str(e)}"
-                    })}\n\n"
-                    break
-                except json.JSONDecodeError:
-                    yield f"data: {json.dumps({
-                        'error': 'Invalid JSON response from AAP'
-                    })}\n\n"
-                    break
-                
-        except Exception as e:
-            yield f"data: {json.dumps({
-                'error': f"Streaming failed: {str(e)}"
-            })}\n\n"
+        # Handle StreamingHttpResponse differently
+        if isinstance(response, StreamingHttpResponse):
+            self._log_streaming_response(request, response, response_time)
+            return response
+        
+        # Regular response handling
+        self._log_regular_response(request, response, response_time)
+        return response
 
-    return StreamingHttpResponse(
-        event_stream(),
-        content_type="text/event-stream"
-    )
+    def _log_request(self, request):
+        """Log request details safely"""
+        request_info = {
+            'method': request.method,
+            'path': request.path,
+            'query_params': dict(request.GET),
+            'headers': {k: v for k, v in request.headers.items()},
+        }
+
+        if request.method in ('POST', 'PUT', 'PATCH'):
+            try:
+                request_info['body'] = json.loads(request.body.decode('utf-8'))
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                request_info['body'] = "(unreadable or non-JSON data)"
+
+        print(f"\n[Request] {json.dumps(request_info, indent=2)}")
+
+    def _log_regular_response(self, request, response, response_time):
+        """Log regular responses"""
+        log_data = {
+            'status': response.status_code,
+            'time': f"{response_time:.3f}s",
+            'headers': dict(response.headers),
+        }
+
+        try:
+            if hasattr(response, 'content'):
+                log_data['content'] = json.loads(response.content.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            log_data['content'] = "(binary or non-JSON data)"
+
+        print(f"[Response] {json.dumps(log_data, indent=2)}")
+
+    def _log_streaming_response(self, request, response, response_time):
+        """Log streaming responses"""
+        log_data = {
+            'status': response.status_code,
+            'time': f"{response_time:.3f}s",
+            'headers': dict(response.headers),
+            'type': 'streaming',
+            'content_type': response.get('Content-Type', ''),
+        }
+        print(f"[Streaming Response] {json.dumps(log_data, indent=2)}")
+
+        # Optionally wrap the streaming content to log chunks
+        if not hasattr(response, '_already_wrapped'):
+            original_stream = response.streaming_content
+            response.streaming_content = self._wrap_stream(original_stream)
+            response._already_wrapped = True
+        return response
+
+    def _wrap_stream(self, stream):
+        """Wrap streaming content to log chunks"""
+        for chunk in stream:
+            try:
+                if isinstance(chunk, bytes):
+                    chunk_str = chunk.decode('utf-8')
+                else:
+                    chunk_str = str(chunk)
+                print(f"[Streaming Chunk] {chunk_str[:200]}...")  # Log first 200 chars
+            except Exception as e:
+                print(f"[Streaming Error] {str(e)}")
+            yield chunk
