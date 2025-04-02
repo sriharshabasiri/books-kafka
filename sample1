@@ -1,324 +1,54 @@
-# api/views.py
-import requests
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
+import React from 'react';
+import './Header.css'; // Create this file for styles
+import discoverLogo from './discover-logo.png'; // Add Discover logo to your assets
 
-AAP_URL = "https://your-aap-server.com"
-AAP_TOKEN = "your-api-token"
-
-@csrf_exempt
-@api_view(['POST'])
-def search_logs(request):
-    try:
-        # Get parameters from frontend
-        uuid = request.data.get('uuid')
-        search_date = request.data.get('search_date')
-        environment = request.data.get('environment', 'dev')
-        
-        # Validate inputs
-        if not uuid or not search_date:
-            return JsonResponse({'error': 'UUID and search_date are required'}, status=400)
-
-        # Launch AAP job
-        job = launch_aap_job(uuid, search_date, environment)
-        
-        # Stream job events and parse results
-        results = get_job_results(job['id'])
-        
-        return Response(results)
-
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-def launch_aap_job(uuid, search_date, environment):
-    """Launch job in Ansible Automation Platform"""
-    headers = {
-        'Authorization': f'Bearer {AAP_TOKEN}',
-        'Content-Type': 'application/json'
-    }
-    
-    payload = {
-        'extra_vars': {
-            'uuid': uuid,
-            'search_date': search_date,
-            'environment': environment
-        }
-    }
-    
-    # Replace with your actual job template ID
-    response = requests.post(
-        f'{AAP_URL}/api/v2/job_templates/123/launch/',
-        headers=headers,
-        json=payload
-    )
-    response.raise_for_status()
-    return response.json()
-
-def get_job_results(job_id):
-    """Get job results from AAP and parse them"""
-    headers = {'Authorization': f'Bearer {AAP_TOKEN}'}
-    results = {'status': 'pending', 'data': None}
-    
-    # Poll job status
-    while results['status'] == 'pending':
-        job_response = requests.get(
-            f'{AAP_URL}/api/v2/jobs/{job_id}/',
-            headers=headers
-        )
-        job_response.raise_for_status()
-        job_data = job_response.json()
-        
-        if job_data['status'] in ['successful', 'failed']:
-            results['status'] = job_data['status']
-            results['data'] = parse_job_output(job_id)
-            break
-        
-        # Wait before polling again
-        time.sleep(2)
-    
-    return results
-
-def parse_job_output(job_id):
-    """Parse job events to extract relevant output"""
-    headers = {'Authorization': f'Bearer {AAP_TOKEN}'}
-    events_response = requests.get(
-        f'{AAP_URL}/api/v2/jobs/{job_id}/job_events/',
-        headers=headers
-    )
-    events_response.raise_for_status()
-    events_data = events_response.json()
-    
-    output = {
-        'success': [],
-        'failures': [],
-        'error_context': []
-    }
-    
-    for event in events_data['results']:
-        if event['event'] == 'runner_on_ok':
-            event_data = event['event_data']
-            res = event_data.get('res', {})
-            
-            # Check for success pattern
-            if 'SUCCESSFUL TRANSACTIONS' in res.get('msg', ''):
-                output['success'] = res['msg'].split('\n')[1:]
-            
-            # Check for failure pattern
-            elif 'FAILURE LINES' in res.get('msg', ''):
-                output['failures'] = res['msg'].split('\n')[1:]
-            
-            # Check for error context
-            elif 'ERROR CONTEXT' in res.get('msg', ''):
-                output['error_context'] = res['msg'].split('\n')[1:]
-    
-    return output
-
-
-// LogSearch.jsx
-import React, { useState } from 'react';
-import axios from 'axios';
-
-const LogSearch = () => {
-  const [formData, setFormData] = useState({
-    uuid: '',
-    search_date: '',
-    environment: 'dev'
-  });
-  const [results, setResults] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await axios.post('/api/search-logs/', formData);
-      setResults(response.data);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to search logs');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+const Header = () => {
   return (
-    <div className="container py-4">
-      <h2 className="mb-4">Log Search via Ansible Automation</h2>
-      
-      <div className="card mb-4">
-        <div className="card-body">
-          <form onSubmit={handleSubmit}>
-            <div className="mb-3">
-              <label htmlFor="uuid" className="form-label">UUID:</label>
-              <input
-                type="text"
-                className="form-control"
-                id="uuid"
-                name="uuid"
-                value={formData.uuid}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            
-            <div className="mb-3">
-              <label htmlFor="search_date" className="form-label">Date (DDMonYYYY):</label>
-              <input
-                type="text"
-                className="form-control"
-                id="search_date"
-                name="search_date"
-                value={formData.search_date}
-                onChange={handleChange}
-                placeholder="e.g., 10Mar2025"
-                required
-              />
-            </div>
-            
-            <div className="mb-3">
-              <label htmlFor="environment" className="form-label">Environment:</label>
-              <select
-                className="form-select"
-                id="environment"
-                name="environment"
-                value={formData.environment}
-                onChange={handleChange}
-              >
-                <option value="dev">Development</option>
-                <option value="prod">Production</option>
-              </select>
-            </div>
-            
-            <button 
-              type="submit" 
-              className="btn btn-primary"
-              disabled={loading}
-            >
-              {loading ? (
-                <>
-                  <span className="spinner-border spinner-border-sm me-2" role="status"></span>
-                  Searching...
-                </>
-              ) : 'Search Logs'}
-            </button>
-          </form>
-        </div>
+    <header className="discover-header">
+      <div className="header-container">
+        <img 
+          src={discoverLogo} 
+          alt="Discover Bank Logo" 
+          className="discover-logo"
+        />
+        <h1 className="portal-title">Banking Platform Predominators Portal</h1>
       </div>
-      
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          {error}
-        </div>
-      )}
-      
-      {results && (
-        <div className="card">
-          <div className="card-body">
-            {results.status === 'successful' && (
-              <>
-                <h3 className="text-success">Successful Transactions</h3>
-                {results.data.success.length > 0 ? (
-                  <pre className="bg-light p-3">{results.data.success.join('\n')}</pre>
-                ) : (
-                  <p>No successful transactions found</p>
-                )}
-              </>
-            )}
-            
-            {results.status === 'failed' && (
-              <>
-                <h3 className="text-danger">Failure Details</h3>
-                {results.data.failures.length > 0 ? (
-                  <pre className="bg-light p-3">{results.data.failures.join('\n')}</pre>
-                ) : (
-                  <p>No failure details found</p>
-                )}
-                
-                {results.data.error_context.length > 0 && (
-                  <>
-                    <h4 className="mt-3">Error Context</h4>
-                    <pre className="bg-light p-3">{results.data.error_context.join('\n')}</pre>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    </header>
   );
 };
 
-export default LogSearch;
+export default Header;
 
 
 
-# api/views.py
-def launch_aap_job(uuid, search_date, environment):
-    try:
-        headers = {
-            'Authorization': f'Bearer {AAP_TOKEN}',
-            'Content-Type': 'application/json'
-        }
-        
-        payload = {
-            'extra_vars': {
-                'uuid': uuid,
-                'search_date': search_date,
-                'environment': environment
-            }
-        }
-        
-        response = requests.post(
-            f'{AAP_URL}/api/v2/job_templates/{JOB_TEMPLATE_ID}/launch/',
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-        
-        if response.status_code == 403:
-            raise Exception("Permission denied - check AAP token")
-        if response.status_code == 404:
-            raise Exception("Job template not found")
-        
-        response.raise_for_status()
-        return response.json()
-        
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"AAP API request failed: {str(e)}")
 
+/* Header.css */
+.discover-header {
+  background-color: #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 15px 0;
+  border-bottom: 1px solid #e1e1e1;
+}
 
-const pollResults = async (jobId) => {
-  try {
-    const response = await axios.get(`/api/job-status/${jobId}/`);
-    if (response.data.status === 'pending') {
-      setTimeout(() => pollResults(jobId), 2000);
-    } else {
-      setResults(response.data);
-      setLoading(false);
-    }
-  } catch (err) {
-    setError(err.response?.data?.error || 'Failed to get job status');
-    setLoading(false);
-  }
-};
+.header-container {
+  display: flex;
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
 
-// Modify handleSubmit to:
-const response = await axios.post('/api/search-logs/', formData);
-if (response.data.status === 'pending') {
-  pollResults(response.data.job_id);
-} else {
-  setResults(response.data);
-  setLoading(false);
+.discover-logo {
+  height: 40px; /* Adjust based on your logo */
+  width: auto;
+}
+
+.portal-title {
+  flex-grow: 1;
+  text-align: center;
+  color: #1a1a1a;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  font-family: 'Arial', sans-serif; /* Discover uses a custom font, Arial is close */
 }
