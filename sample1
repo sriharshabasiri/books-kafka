@@ -1,9 +1,12 @@
 # api/views.py
-import os
+import requests
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
-from ansible_runner import run
+from rest_framework.response import Response
+
+AAP_URL = "https://your-aap-server.com"
+AAP_TOKEN = "your-api-token"
 
 @csrf_exempt
 @api_view(['POST'])
@@ -18,71 +21,99 @@ def search_logs(request):
         if not uuid or not search_date:
             return JsonResponse({'error': 'UUID and search_date are required'}, status=400)
 
-        # Prepare extra vars for Ansible
-        extra_vars = {
-            'uuid': uuid,
-            'search_date': search_date,
-            'main_log_path': f'/opt/finacle/{environment}/common/log/',
-            'error_log_paths': [
-                f'/opt/finacle/{environment}/common/log/finint/fcrmmb',
-                f'/opt/finacle/{environment}/common/log/fsb/fsbwebservice'
-            ]
-        }
-
-        # Run Ansible playbook
-        result = run(
-            playbook='log_search.yml',
-            extravars=extra_vars,
-            quiet=True
-        )
-
-        # Process results
-        if result.status == "successful":
-            # Parse Ansible output to extract the relevant information
-            output = parse_ansible_output(result)
-            return JsonResponse(output)
-        else:
-            return JsonResponse({'error': 'Ansible playbook failed', 'details': result.stderr}, status=500)
+        # Launch AAP job
+        job = launch_aap_job(uuid, search_date, environment)
+        
+        # Stream job events and parse results
+        results = get_job_results(job['id'])
+        
+        return Response(results)
 
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-def parse_ansible_output(result):
-    """Parse Ansible runner output to extract success/failure results"""
-    output = {'status': 'not_found'}
+def launch_aap_job(uuid, search_date, environment):
+    """Launch job in Ansible Automation Platform"""
+    headers = {
+        'Authorization': f'Bearer {AAP_TOKEN}',
+        'Content-Type': 'application/json'
+    }
     
-    for event in result.events:
+    payload = {
+        'extra_vars': {
+            'uuid': uuid,
+            'search_date': search_date,
+            'environment': environment
+        }
+    }
+    
+    # Replace with your actual job template ID
+    response = requests.post(
+        f'{AAP_URL}/api/v2/job_templates/123/launch/',
+        headers=headers,
+        json=payload
+    )
+    response.raise_for_status()
+    return response.json()
+
+def get_job_results(job_id):
+    """Get job results from AAP and parse them"""
+    headers = {'Authorization': f'Bearer {AAP_TOKEN}'}
+    results = {'status': 'pending', 'data': None}
+    
+    # Poll job status
+    while results['status'] == 'pending':
+        job_response = requests.get(
+            f'{AAP_URL}/api/v2/jobs/{job_id}/',
+            headers=headers
+        )
+        job_response.raise_for_status()
+        job_data = job_response.json()
+        
+        if job_data['status'] in ['successful', 'failed']:
+            results['status'] = job_data['status']
+            results['data'] = parse_job_output(job_id)
+            break
+        
+        # Wait before polling again
+        time.sleep(2)
+    
+    return results
+
+def parse_job_output(job_id):
+    """Parse job events to extract relevant output"""
+    headers = {'Authorization': f'Bearer {AAP_TOKEN}'}
+    events_response = requests.get(
+        f'{AAP_URL}/api/v2/jobs/{job_id}/job_events/',
+        headers=headers
+    )
+    events_response.raise_for_status()
+    events_data = events_response.json()
+    
+    output = {
+        'success': [],
+        'failures': [],
+        'error_context': []
+    }
+    
+    for event in events_data['results']:
         if event['event'] == 'runner_on_ok':
             event_data = event['event_data']
-            # Check for success results
-            if 'SUCCESSFUL TRANSACTIONS' in event_data.get('res', {}).get('msg', ''):
-                output.update({
-                    'status': 'success',
-                    'results': event_data['res']['msg'].split('\n')[1:]  # Skip header line
-                })
-            # Check for failure results
-            elif 'FAILURE LINES' in event_data.get('res', {}).get('msg', ''):
-                output.update({
-                    'status': 'failure',
-                    'results': event_data['res']['msg'].split('\n')[1:]  # Skip header line
-                })
+            res = event_data.get('res', {})
+            
+            # Check for success pattern
+            if 'SUCCESSFUL TRANSACTIONS' in res.get('msg', ''):
+                output['success'] = res['msg'].split('\n')[1:]
+            
+            # Check for failure pattern
+            elif 'FAILURE LINES' in res.get('msg', ''):
+                output['failures'] = res['msg'].split('\n')[1:]
+            
             # Check for error context
-            elif 'ERROR CONTEXT' in event_data.get('res', {}).get('msg', ''):
-                output['error_context'] = event_data['res']['msg'].split('\n')[1:]  # Skip header line
+            elif 'ERROR CONTEXT' in res.get('msg', ''):
+                output['error_context'] = res['msg'].split('\n')[1:]
     
     return output
-
-
-
-
-
-# urls.py
-from django.urls import path
-from .views import search_logs
-
-urlpatterns = [
-    path('api/search-logs/', search_logs, name='search-logs'),
-]
 
 
 // LogSearch.jsx
@@ -90,12 +121,21 @@ import React, { useState } from 'react';
 import axios from 'axios';
 
 const LogSearch = () => {
-  const [uuid, setUuid] = useState('');
-  const [searchDate, setSearchDate] = useState('');
-  const [environment, setEnvironment] = useState('dev');
+  const [formData, setFormData] = useState({
+    uuid: '',
+    search_date: '',
+    environment: 'dev'
+  });
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value
+    });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -103,12 +143,7 @@ const LogSearch = () => {
     setError(null);
     
     try {
-      const response = await axios.post('/api/search-logs/', {
-        uuid,
-        search_date: searchDate,
-        environment
-      });
-      
+      const response = await axios.post('/api/search-logs/', formData);
       setResults(response.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to search logs');
@@ -118,74 +153,107 @@ const LogSearch = () => {
   };
 
   return (
-    <div className="log-search-container">
-      <h2>Log Search</h2>
+    <div className="container py-4">
+      <h2 className="mb-4">Log Search via Ansible Automation</h2>
       
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label>UUID:</label>
-          <input 
-            type="text" 
-            value={uuid} 
-            onChange={(e) => setUuid(e.target.value)} 
-            required 
-          />
+      <div className="card mb-4">
+        <div className="card-body">
+          <form onSubmit={handleSubmit}>
+            <div className="mb-3">
+              <label htmlFor="uuid" className="form-label">UUID:</label>
+              <input
+                type="text"
+                className="form-control"
+                id="uuid"
+                name="uuid"
+                value={formData.uuid}
+                onChange={handleChange}
+                required
+              />
+            </div>
+            
+            <div className="mb-3">
+              <label htmlFor="search_date" className="form-label">Date (DDMonYYYY):</label>
+              <input
+                type="text"
+                className="form-control"
+                id="search_date"
+                name="search_date"
+                value={formData.search_date}
+                onChange={handleChange}
+                placeholder="e.g., 10Mar2025"
+                required
+              />
+            </div>
+            
+            <div className="mb-3">
+              <label htmlFor="environment" className="form-label">Environment:</label>
+              <select
+                className="form-select"
+                id="environment"
+                name="environment"
+                value={formData.environment}
+                onChange={handleChange}
+              >
+                <option value="dev">Development</option>
+                <option value="prod">Production</option>
+              </select>
+            </div>
+            
+            <button 
+              type="submit" 
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status"></span>
+                  Searching...
+                </>
+              ) : 'Search Logs'}
+            </button>
+          </form>
         </div>
-        
-        <div className="form-group">
-          <label>Date (DDMonYYYY):</label>
-          <input 
-            type="text" 
-            value={searchDate} 
-            onChange={(e) => setSearchDate(e.target.value)}
-            placeholder="e.g., 10Mar2025"
-            required 
-          />
-        </div>
-        
-        <div className="form-group">
-          <label>Environment:</label>
-          <select value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-            <option value="dev">Development</option>
-            <option value="prod">Production</option>
-          </select>
-        </div>
-        
-        <button type="submit" disabled={loading}>
-          {loading ? 'Searching...' : 'Search Logs'}
-        </button>
-      </form>
+      </div>
       
-      {error && <div className="error-message">{error}</div>}
+      {error && (
+        <div className="alert alert-danger" role="alert">
+          {error}
+        </div>
+      )}
       
       {results && (
-        <div className="results-container">
-          {results.status === 'success' && (
-            <div className="success-results">
-              <h3>Successful Transactions</h3>
-              <pre>{results.results.join('\n')}</pre>
-            </div>
-          )}
-          
-          {results.status === 'failure' && (
-            <div className="failure-results">
-              <h3>Failure Details</h3>
-              <pre>{results.results.join('\n')}</pre>
-              
-              {results.error_context && (
-                <>
-                  <h3>Error Context</h3>
-                  <pre>{results.error_context.join('\n')}</pre>
-                </>
-              )}
-            </div>
-          )}
-          
-          {results.status === 'not_found' && (
-            <div className="no-results">
-              No matching entries found for UUID {uuid} on date {searchDate}
-            </div>
-          )}
+        <div className="card">
+          <div className="card-body">
+            {results.status === 'successful' && (
+              <>
+                <h3 className="text-success">Successful Transactions</h3>
+                {results.data.success.length > 0 ? (
+                  <pre className="bg-light p-3">{results.data.success.join('\n')}</pre>
+                ) : (
+                  <p>No successful transactions found</p>
+                )}
+              </>
+            )}
+            
+            {results.status === 'failed' && (
+              <>
+                <h3 className="text-danger">Failure Details</h3>
+                {results.data.failures.length > 0 ? (
+                  <pre className="bg-light p-3">{results.data.failures.join('\n')}</pre>
+                ) : (
+                  <p>No failure details found</p>
+                )}
+                
+                {results.data.error_context.length > 0 && (
+                  <>
+                    <h4 className="mt-3">Error Context</h4>
+                    <pre className="bg-light p-3">{results.data.error_context.join('\n')}</pre>
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -193,3 +261,64 @@ const LogSearch = () => {
 };
 
 export default LogSearch;
+
+
+
+# api/views.py
+def launch_aap_job(uuid, search_date, environment):
+    try:
+        headers = {
+            'Authorization': f'Bearer {AAP_TOKEN}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'extra_vars': {
+                'uuid': uuid,
+                'search_date': search_date,
+                'environment': environment
+            }
+        }
+        
+        response = requests.post(
+            f'{AAP_URL}/api/v2/job_templates/{JOB_TEMPLATE_ID}/launch/',
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code == 403:
+            raise Exception("Permission denied - check AAP token")
+        if response.status_code == 404:
+            raise Exception("Job template not found")
+        
+        response.raise_for_status()
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"AAP API request failed: {str(e)}")
+
+
+const pollResults = async (jobId) => {
+  try {
+    const response = await axios.get(`/api/job-status/${jobId}/`);
+    if (response.data.status === 'pending') {
+      setTimeout(() => pollResults(jobId), 2000);
+    } else {
+      setResults(response.data);
+      setLoading(false);
+    }
+  } catch (err) {
+    setError(err.response?.data?.error || 'Failed to get job status');
+    setLoading(false);
+  }
+};
+
+// Modify handleSubmit to:
+const response = await axios.post('/api/search-logs/', formData);
+if (response.data.status === 'pending') {
+  pollResults(response.data.job_id);
+} else {
+  setResults(response.data);
+  setLoading(false);
+}
