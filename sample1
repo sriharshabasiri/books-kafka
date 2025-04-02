@@ -1,5 +1,5 @@
-  {% if end_time and end_time != '' -%}
-  {{ end_time | regex_replace('\\s+', ' ') | trim }}
-  {%- else -%}
-  {{ ((normalized_start | to_datetime('%Y-%m-%d %H:%M')).timestamp() | int + 3600) | to_datetime('%s') | strftime('%Y-%m-%d %H:%M') }}
-  {%- endif %}
+      {% if end_time and end_time != '' -%}
+      {{ end_time | regex_replace('\\s+', ' ') | trim }}
+      {%- else -%}
+      {{ ((normalized_start | to_datetime('%Y-%m-%d %H:%M')).strftime('%s') | int + 3600) | string | to_datetime('%s') | strftime('%Y-%m-%d %H:%M') }}
+      {%- endif %}
