@@ -1,129 +1,27 @@
 ---
-- name: Search logs by UUID with time range validation
-  hosts: "{{ environment }}_servers"
+- name: Log Search with Correct Time Math
   vars:
-    # Environment-specific log paths
-    log_paths:
-      dev:
-        instr_path: "/opt/finacle/dev/common/log/"
-        error_paths:
-          - "/opt/finacle/dev/common/log/finint/fcrmmb"
-          - "/opt/finacle/dev/common/log/fsb/fsbwebservice"
-      prod:
-        instr_path: "/opt/finacle/prod/common/log/"
-        error_paths:
-          - "/opt/finacle/prod/common/log/finint/fcrmmb"
-          - "/opt/finacle/prod/common/log/fsb/fsbwebservice"
-
     # Input normalization
     normalized_start: "{{ (start_time | default('')) | regex_replace('\\s+', ' ') | trim }}"
+    
+    # Safe time calculation using timedelta
     normalized_end: >-
-      {% if end_time and end_time != '' -%}
+      {%- if end_time and end_time != '' -%}
       {{ end_time | regex_replace('\\s+', ' ') | trim }}
       {%- else -%}
-      {{ (normalized_start | to_datetime('%Y-%m-%d %H:%M') + 3600 | strftime('%Y-%m-%d %H:%M') }}
+      {{ ((normalized_start | to_datetime('%Y-%m-%d %H:%M')) + 
+          (0 | ansible.utils.timedelta(seconds=3600)) | 
+          strftime('%Y-%m-%d %H:%M') }}
       {%- endif %}
-    
-    output_dir: "/central/UUID_Check/{{ uuid }}"
-    max_hours_range: 24
-
-  pre_tasks:
-    - name: Validate required parameters
-      ansible.builtin.assert:
-        that:
-          - uuid | length >= 3
-          - normalized_start != ""
-        fail_msg: "UUID and start_time are required parameters"
-
-    - name: Validate time format
-      ansible.builtin.assert:
-        that:
-          - normalized_start is match('^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$')
-          - normalized_end is match('^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$')
-        fail_msg: "Times must be in 'YYYY-MM-DD HH:MM' format"
-
-    - name: Validate time range
-      ansible.builtin.assert:
-        that:
-          - "(normalized_end | to_datetime('%Y-%m-%d %H:%M')) > (normalized_start | to_datetime('%Y-%m-%d %H:%M'))"
-          - "(normalized_end | to_datetime('%Y-%m-%d %H:%M') - normalized_start | to_datetime('%Y-%m-%d %H:%M')).total_seconds() <= (max_hours_range * 3600)"
-        fail_msg: "Time range must be ≤{{ max_hours_range }} hours and end_time > start_time"
-
-    - name: Set environment paths
-      ansible.builtin.set_fact:
-        instr_path: "{{ log_paths[environment].instr_path }}"
-        error_paths: "{{ log_paths[environment].error_paths }}"
-      when: environment in log_paths
-
-    - name: Create output directory
-      ansible.builtin.file:
-        path: "{{ output_dir }}"
-        state: directory
-        mode: '0755'
 
   tasks:
-    - name: Search instrumentation logs
-      ansible.builtin.shell: |
-        set -o pipefail
-        search_start="{{ normalized_start | to_datetime('%Y-%m-%d %H:%M') | strftime('%b%d%y %H:%M') }}"
-        search_end="{{ normalized_end | to_datetime('%Y-%m-%d %H:%M') | strftime('%b%d%y %H:%M') }}"
-        
-        find {{ instr_path }} -name "instrumentation*.log*" -newermt "$search_start" ! -newermt "$search_end" \
-          -exec grep -li "{{ uuid }}" {} + | xargs grep -i "{{ uuid }}" > {{ output_dir }}/result_uuid.txt
-        
-        if [[ -s {{ output_dir }}/result_uuid.txt ]]; then
-          status=$(cut -d , -f4 {{ output_dir }}/result_uuid.txt | head -1)
-          if [[ "$status" == "success" ]]; then
-            echo "SUCCESS: Found in instrumentation logs between $search_start and $search_end"
-            cat {{ output_dir }}/result_uuid.txt
-            exit 0
-          fi
-        fi
-        exit 1
-      register: uuid_search
-      ignore_errors: yes
-      args:
-        executable: /bin/bash
-
-    - name: Search error logs if needed
-      when: uuid_search.failed
-      block:
-        - name: Search all error paths
-          ansible.builtin.shell: |
-            set -o pipefail
-            > {{ output_dir }}/error_result.txt
-            
-            for path in {{ error_paths | join(' ') }}; do
-              find "$path" -name "ciErrorLog*" -newermt "{{ normalized_start }}" ! -newermt "{{ normalized_end }}" \
-                -exec grep -li "{{ uuid }}" {} + | xargs grep -A 15 -B5 "{{ uuid }}" >> {{ output_dir }}/error_result.txt
-            done
-            
-            if [[ -s {{ output_dir }}/error_result.txt ]]; then
-              echo "ERROR LOGS: Found between {{ normalized_start }} and {{ normalized_end }}"
-              cat {{ output_dir }}/error_result.txt
-              exit 0
-            else
-              exit 1
-            fi
-          register: error_search
-          args:
-            executable: /bin/bash
-
-        - name: Handle not found case
-          ansible.builtin.fail:
-            msg: >-
-              UUID {{ uuid }} not found in {{ environment }} logs between
-              {{ normalized_start }} and {{ normalized_end }}
-          when: error_search.failed
-
-  post_tasks:
-    - name: Display results
+    - name: Debug time calculations
       ansible.builtin.debug:
-        msg: "{{ lookup('file', output_dir ~ '/result_uuid.txt') | default(lookup('file', output_dir ~ '/error_result.txt')) }}"
-      when: not uuid_search.failed or not error_search.failed
-
-    - name: Clean up if no results
-      ansible.builtin.file:
-        path: "{{ output_dir }}"
-        state: absent
-      when: uuid_search.failed and error_search.failed
+        msg: |
+          Start: {{ normalized_start }}
+          End: {{ normalized_end }}
+          Calculation: {{ 
+            ((normalized_start | to_datetime('%Y-%m-%d %H:%M')) + 
+            (0 | ansible.utils.timedelta(seconds=3600)) | 
+            strftime('%Y-%m-%d %H:%M') 
+          }}
