@@ -1,5 +1,5 @@
       {% if end_time and end_time != '' -%}
       {{ end_time | regex_replace('\\s+', ' ') | trim }}
       {%- else -%}
-      {{ (normalized_start | to_datetime('%Y-%m-%d %H:%M') | ansible.builtin.strftime('%Y-%m-%d %H:') + '%02d' | format(((normalized_start | to_datetime('%Y-%m-%d %H:%M')).hour + 1) % 24)) }}
+      {{ (normalized_start | to_datetime('%Y-%m-%d %H:%M') | ansible.builtin.strftime('%Y-%m-%d %H:%M') | to_datetime('%Y-%m-%d %H:%M') + (60 * 60) ) | to_datetime('%s') | strftime('%Y-%m-%d %H:%M') }}
       {%- endif %}
