@@ -1,9 +1,8 @@
     normalized_end: >-
       {%- if end_time and end_time != '' -%}
-      {{ end_time | trim }}
+      {{ end_time | regex_replace('\\s+', ' ') | trim }}
       {%- else -%}
-      {%- set ns = namespace() -%}
-      {%- set ns.start = (normalized_start | to_datetime('%Y-%m-%d %H:%M')) -%}
-      {%- set ns.end = ns.start + namespace.datetime.timedelta(hours=1) -%}
-      {{ ns.end.strftime('%Y-%m-%d %H:%M') }}
+      {%- set start_dt = normalized_start | to_datetime('%Y-%m-%d %H:%M') -%}
+      {%- set end_dt = start_dt + (60*60) -%}  # Adding 3600 seconds directly
+      {{ end_dt | strftime('%Y-%m-%d %H:%M') }}
       {%- endif %}
