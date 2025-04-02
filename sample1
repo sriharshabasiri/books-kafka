@@ -1,16 +1,5 @@
-    normalized_start: >-
-      {% if start_time | regex_match('^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$') %}
-      {{ start_time }}
-      {% else %}
-      {{ '' }}
-      {% endif %}
-    
-    normalized_end: >-
-      {% if end_time and end_time | regex_match('^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$') %}
-      {{ end_time }}
-      {% elif normalized_start %}
-      {% set start_epoch = (normalized_start | to_datetime('%Y-%m-%d %H:%M')).timestamp() %}
-      {{ (start_epoch + 3600) | to_datetime | strftime('%Y-%m-%d %H:%M') }}
-      {% else %}
-      {{ '' }}
-      {% endif %}
+  {% if end_time and end_time != '' -%}
+  {{ end_time | regex_replace('\\s+', ' ') | trim }}
+  {%- else -%}
+  {{ ((normalized_start | to_datetime('%Y-%m-%d %H:%M')).timestamp() | int + 3600) | to_datetime('%s') | strftime('%Y-%m-%d %H:%M') }}
+  {%- endif %}
