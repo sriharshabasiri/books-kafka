@@ -1,27 +1,9 @@
----
-- name: Log Search with Correct Time Math
-  vars:
-    # Input normalization
-    normalized_start: "{{ (start_time | default('')) | regex_replace('\\s+', ' ') | trim }}"
-    
-    # Safe time calculation using timedelta
     normalized_end: >-
       {%- if end_time and end_time != '' -%}
-      {{ end_time | regex_replace('\\s+', ' ') | trim }}
+      {{ end_time | trim }}
       {%- else -%}
-      {{ ((normalized_start | to_datetime('%Y-%m-%d %H:%M')) + 
-          (0 | ansible.utils.timedelta(seconds=3600)) | 
-          strftime('%Y-%m-%d %H:%M') }}
+      {%- set ns = namespace() -%}
+      {%- set ns.start = (normalized_start | to_datetime('%Y-%m-%d %H:%M')) -%}
+      {%- set ns.end = ns.start + namespace.datetime.timedelta(hours=1) -%}
+      {{ ns.end.strftime('%Y-%m-%d %H:%M') }}
       {%- endif %}
-
-  tasks:
-    - name: Debug time calculations
-      ansible.builtin.debug:
-        msg: |
-          Start: {{ normalized_start }}
-          End: {{ normalized_end }}
-          Calculation: {{ 
-            ((normalized_start | to_datetime('%Y-%m-%d %H:%M')) + 
-            (0 | ansible.utils.timedelta(seconds=3600)) | 
-            strftime('%Y-%m-%d %H:%M') 
-          }}
