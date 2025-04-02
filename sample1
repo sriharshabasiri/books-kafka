@@ -1,50 +1,182 @@
 ---
-- name: Search logs with proper file handling
+- name: Search logs with Ansible-native approach
   hosts: localhost
   vars:
+    # Configuration
     main_log_path: "/opt/finacle/dfsapp/common/log/"
     error_log_paths:
       - "/opt/finacle/dfsapp/common/log/finint/fcrmmb"
       - "/opt/finacle/dfsapp/common/log/fsb/fsbwebservice"
     
+    # Input parameters
     uuid: ""
-    search_date: ""
+    search_date: ""  # Format: 10Mar2025
     max_results: 5
 
   tasks:
-    # Previous tasks (validation, date conversion, etc.) remain the same
-    
+    - name: Validate inputs
+      ansible.builtin.assert:
+        that:
+          - uuid | length >= 3
+          - search_date | regex_match('^[0-9]{2}[A-Za-z]{3}[0-9]{4}$')
+        fail_msg: "Invalid inputs. UUID required and date format must be DDMonYYYY (e.g., 10Mar2025)"
+
+    - name: Convert date formats for searching
+      ansible.builtin.set_fact:
+        # For instrumentation logs (10Mar2025 18:00)
+        instr_date: "{{ search_date }}"
+        
+        # For error logs (2025-03-10 18:00)
+        error_date: >-
+          {{ 
+            search_date[5:] + '-' + 
+            ({'Jan':'01','Feb':'02','Mar':'03','Apr':'04','May':'05','Jun':'06',
+              'Jul':'07','Aug':'08','Sep':'09','Oct':'10','Nov':'11','Dec':'12'
+            }[search_date[2:5]]) + '-' + 
+            search_date[:2] 
+          }}
+
+    - name: Find instrumentation log files
+      ansible.builtin.find:
+        paths: "{{ main_log_path }}"
+        patterns: "instrumentation*.log*"
+        use_regex: no
+      register: instrumentation_files
+
     - name: Search instrumentation logs for success
       ansible.builtin.shell: |
-        set -o pipefail
-        output_file="/tmp/success_results.txt"
-        > "$output_file"
-        
-        find {{ main_log_path }} -name "instrumentation*.log*" -exec grep -i "{{ uuid }}" {} + | 
+        grep -i "{{ uuid }}" "{{ item.path }}" | 
         grep -i "{{ instr_date }}" |
-        awk -F, '$4 == "success"' |
-        tail -n {{ max_results }} > "$output_file"
-        
-        if [ ! -s "$output_file" ]; then
-          echo "No successful transactions found" > "$output_file"
-        fi
-      register: success_search
+        awk -F, '$4 == "success"'
+      register: success_entries
+      loop: "{{ instrumentation_files.files }}"
       ignore_errors: yes
       changed_when: false
+      when: instrumentation_files.matched > 0
 
-    - name: Process and display success results
+    - name: Process success results
       block:
-        - name: Read success results
-          ansible.builtin.shell: |
-            cat /tmp/success_results.txt
-          register: success_output
-          changed_when: false
-
+        - name: Format success results
+          ansible.builtin.set_fact:
+            success_results: >-
+              {{
+                success_entries.results | 
+                map(attribute='stdout_lines') | 
+                flatten | 
+                unique | 
+                sort | 
+                list | 
+                join('\n')
+              }}
+        
+        - name: Limit to latest results
+          ansible.builtin.set_fact:
+            final_success_results: >-
+              {{
+                (success_results.split('\n') | 
+                reverse)[:max_results|int] | 
+                reverse | 
+                join('\n')
+              }}
+          when: success_results != ""
+      
         - name: Show success results
           ansible.builtin.debug:
             msg: |
-              SUCCESSFUL TRANSACTIONS:
-              {{ success_output.stdout }}
-      when: success_search.rc == 0
+              SUCCESSFUL TRANSACTIONS (latest {{ max_results }}):
+              {{ final_success_results | default('No successful transactions found') }}
+      when: success_entries is defined and success_entries.results | length > 0
 
-    # Rest of your playbook...
+    - name: Search instrumentation logs for failures
+      ansible.builtin.shell: |
+        grep -i "{{ uuid }}" "{{ item.path }}" | 
+        grep -i "{{ instr_date }}" |
+        awk -F, '$4 != "success"'
+      register: failure_entries
+      loop: "{{ instrumentation_files.files }}"
+      ignore_errors: yes
+      changed_when: false
+      when: 
+        - instrumentation_files.matched > 0
+        - success_entries is not defined or success_entries.results | length == 0
+
+    - name: Find error log files
+      ansible.builtin.find:
+        paths: "{{ item }}"
+        patterns: "ciErrorLog*"
+        use_regex: no
+      register: error_files
+      loop: "{{ error_log_paths }}"
+      when: 
+        - failure_entries is defined 
+        - failure_entries.results | length > 0
+
+    - name: Search error logs for context
+      ansible.builtin.shell: |
+        grep -A 20 -i "{{ uuid }}" "{{ item.path }}" |
+        grep -A 20 -i "{{ error_date }}"
+      register: error_context
+      loop: "{{ error_files.results | map(attribute='files') | flatten }}"
+      ignore_errors: yes
+      changed_when: false
+      when: error_files is defined
+
+    - name: Process failure results
+      block:
+        - name: Format failure results
+          ansible.builtin.set_fact:
+            failure_results: >-
+              {{
+                failure_entries.results | 
+                map(attribute='stdout_lines') | 
+                flatten | 
+                unique | 
+                sort | 
+                list | 
+                join('\n')
+              }}
+        
+        - name: Limit to latest failure results
+          ansible.builtin.set_fact:
+            final_failure_results: >-
+              {{
+                (failure_results.split('\n') | 
+                reverse)[:max_results|int] | 
+                reverse | 
+                join('\n')
+              }}
+          when: failure_results != ""
+        
+        - name: Format error context
+          ansible.builtin.set_fact:
+            final_error_context: >-
+              {{
+                error_context.results | 
+                map(attribute='stdout_lines') | 
+                flatten | 
+                slice(0, 20*max_results|int) | 
+                join('\n')
+              }}
+          when: error_context is defined
+        
+        - name: Show failure results
+          ansible.builtin.debug:
+            msg: |
+              FAILURE LINES (latest {{ max_results }}):
+              {{ final_failure_results | default('No failure lines found') }}
+        
+        - name: Show error context
+          ansible.builtin.debug:
+            msg: |
+              ERROR CONTEXT (first {{ max_results*20 }} lines):
+              {{ final_error_context | default('No error context found') }}
+      when: 
+        - failure_entries is defined 
+        - failure_entries.results | length > 0
+
+    - name: No results found
+      ansible.builtin.debug:
+        msg: "No matching entries found for UUID {{ uuid }} on date {{ search_date }}"
+      when: 
+        - success_entries is not defined or success_entries.results | length == 0
+        - failure_entries is not defined or failure_entries.results | length == 0
