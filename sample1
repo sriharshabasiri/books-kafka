@@ -26,12 +26,12 @@ const LogSearchForm = () => {
   const handleRegionChange = (e) => {
     const region = e.target.value;
     setSelectedRegion(region);
-    setSelectedEnvironment(''); // Reset environment when region changes
+    setSelectedEnvironment('');
   };
 
   const handleUuidChange = (e) => {
     const value = e.target.value;
-    if (value.length <= 64) { // Enforce 64 char limit
+    if (value.length <= 64) {
       setUuid(value);
     }
   };
@@ -41,7 +41,7 @@ const LogSearchForm = () => {
     const day = date.getDate().toString().padStart(2, '0');
     const month = date.toLocaleString('default', { month: 'short' });
     const year = date.getFullYear();
-    return `${day}${month}${year}`; // DDMonYYYY format
+    return `${day}${month}${year}`;
   };
 
   const handleSubmit = async (e) => {
@@ -49,7 +49,6 @@ const LogSearchForm = () => {
     setError('');
     setSuccess('');
 
-    // Validation
     if (!selectedRegion || !selectedEnvironment || !uuid || !selectedDate) {
       setError('Please fill all fields');
       return;
@@ -69,9 +68,7 @@ const LogSearchForm = () => {
         uuid: uuid,
         date: formattedDate
       });
-
       setSuccess('Log search initiated successfully!');
-      console.log('API Response:', response.data);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to initiate log search');
     } finally {
@@ -83,139 +80,104 @@ const LogSearchForm = () => {
     <div className="log-search-container">
       <h2>Log Search</h2>
       
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="inline-form">
         {/* Region Dropdown */}
-        <div className="form-group">
+        <div className="form-row">
           <label htmlFor="region">Region:</label>
-          <select
-            id="region"
-            value={selectedRegion}
-            onChange={handleRegionChange}
-            required
-          >
-            <option value="">Select a region</option>
-            {Object.keys(regionEnvironments).map(region => (
-              <option key={region} value={region}>{region.toUpperCase()}</option>
-            ))}
-          </select>
+          <div className="form-control">
+            <select
+              id="region"
+              value={selectedRegion}
+              onChange={handleRegionChange}
+              required
+            >
+              <option value="">Select a region</option>
+              {Object.keys(regionEnvironments).map(region => (
+                <option key={region} value={region}>{region.toUpperCase()}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Environment Dropdown */}
         {selectedRegion && (
-          <div className="form-group">
+          <div className="form-row">
             <label htmlFor="environment">Environment:</label>
-            <select
-              id="environment"
-              value={selectedEnvironment}
-              onChange={(e) => setSelectedEnvironment(e.target.value)}
-              required
-            >
-              <option value="">Select environment</option>
-              {regionEnvironments[selectedRegion].map(env => (
-                <option key={env} value={env}>{env}</option>
-              ))}
-            </select>
+            <div className="form-control">
+              <select
+                id="environment"
+                value={selectedEnvironment}
+                onChange={(e) => setSelectedEnvironment(e.target.value)}
+                required
+              >
+                <option value="">Select environment</option>
+                {regionEnvironments[selectedRegion].map(env => (
+                  <option key={env} value={env}>{env}</option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
 
         {/* UUID Input */}
-        <div className="form-group">
-          <label htmlFor="uuid">UUID (64 characters):</label>
-          <input
-            type="text"
-            id="uuid"
-            value={uuid}
-            onChange={handleUuidChange}
-            maxLength={64}
-            pattern="[a-fA-F0-9]{64}"
-            title="64 character UUID"
-            required
-          />
-          <small>Characters entered: {uuid.length}/64</small>
+        <div className="form-row">
+          <label htmlFor="uuid">UUID:</label>
+          <div className="form-control">
+            <input
+              type="text"
+              id="uuid"
+              value={uuid}
+              onChange={handleUuidChange}
+              maxLength={64}
+              pattern="[a-fA-F0-9]{64}"
+              title="64 character UUID"
+              required
+            />
+            <div className="char-count">{uuid.length}/64</div>
+          </div>
         </div>
 
         {/* Date Picker */}
-        <div className="form-group">
-          <label htmlFor="date">Date (past week):</label>
-          <DatePicker
-            id="date"
-            selected={selectedDate}
-            onChange={(date) => setSelectedDate(date)}
-            minDate={minDate}
-            maxDate={maxDate}
-            dateFormat="yyyy-MM-dd"
-            placeholderText="Select a date"
-            required
-          />
-          {selectedDate && (
-            <small>Formatted date: {formatDate(selectedDate)}</small>
-          )}
+        <div className="form-row">
+          <label htmlFor="date">Date:</label>
+          <div className="form-control">
+            <DatePicker
+              id="date"
+              selected={selectedDate}
+              onChange={(date) => setSelectedDate(date)}
+              minDate={minDate}
+              maxDate={maxDate}
+              dateFormat="yyyy-MM-dd"
+              placeholderText="Select a date"
+              required
+            />
+            {selectedDate && (
+              <div className="date-preview">{formatDate(selectedDate)}</div>
+            )}
+          </div>
         </div>
 
         {/* Submit Button */}
-        <button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Submitting...' : 'Search Logs'}
-        </button>
+        <div className="form-row">
+          <div className="form-control">
+            <button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Submitting...' : 'Search Logs'}
+            </button>
+          </div>
+        </div>
 
         {/* Status Messages */}
-        {error && <div className="error-message">{error}</div>}
-        {success && <div className="success-message">{success}</div>}
+        {(error || success) && (
+          <div className="form-row">
+            <div className="form-message">
+              {error && <div className="error-message">{error}</div>}
+              {success && <div className="success-message">{success}</div>}
+            </div>
+          </div>
+        )}
       </form>
     </div>
   );
 };
 
 export default LogSearchForm;
-
-
-
-.log-search-container {
-  max-width: 500px;
-  margin: 0 auto;
-  padding: 20px;
-}
-
-.form-group {
-  margin-bottom: 15px;
-}
-
-label {
-  display: block;
-  margin-bottom: 5px;
-  font-weight: bold;
-}
-
-select, input {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-.error-message {
-  color: #d32f2f;
-  margin-top: 10px;
-}
-
-.success-message {
-  color: #388e3c;
-  margin-top: 10px;
-}
-
-button {
-  background-color: #1976d2;
-  color: white;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-button:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
-}
-
-.react-datepicker-wrapper {
-  width: 100%;
-}
