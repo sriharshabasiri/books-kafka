@@ -2,12 +2,74 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 const CertificateRenewalApp = () => {
-  // State for regions, environments, servers, and certificates
-  const [regions, setRegions] = useState([]);
+  // Predefined data
+  const regions = [
+    { id: 'dev', name: 'Development' },
+    { id: 'esqm', name: 'ESQM' },
+    { id: 'perf', name: 'Performance' }
+  ];
+
+  const environments = {
+    dev: [
+      { id: 'dev1', name: 'Development 1' },
+      { id: 'dev2', name: 'Development 2' }
+    ],
+    esqm: [
+      { id: 'esqm1', name: 'ESQM 1' },
+      { id: 'esqm2', name: 'ESQM 2' }
+    ],
+    perf: [
+      { id: 'perf1', name: 'Performance 1' },
+      { id: 'perf2', name: 'Performance 2' }
+    ]
+  };
+
+  const servers = {
+    dev1: [
+      { id: 'dev1-jboss1', name: 'JBoss 1' },
+      { id: 'dev1-jboss2', name: 'JBoss 2' },
+      { id: 'dev1-core1', name: 'Core 1' }
+    ],
+    dev2: [
+      { id: 'dev2-jboss1', name: 'JBoss 1' },
+      { id: 'dev2-core1', name: 'Core 1' },
+      { id: 'dev2-core2', name: 'Core 2' }
+    ],
+    esqm1: [
+      { id: 'esqm1-jboss1', name: 'JBoss 1' },
+      { id: 'esqm1-core1', name: 'Core 1' }
+    ],
+    esqm2: [
+      { id: 'esqm2-jboss1', name: 'JBoss 1' },
+      { id: 'esqm2-jboss2', name: 'JBoss 2' }
+    ],
+    perf1: [
+      { id: 'perf1-jboss1', name: 'JBoss 1' },
+      { id: 'perf1-core1', name: 'Core 1' },
+      { id: 'perf1-core2', name: 'Core 2' }
+    ],
+    perf2: [
+      { id: 'perf2-jboss1', name: 'JBoss 1' },
+      { id: 'perf2-jboss2', name: 'JBoss 2' }
+    ]
+  };
+
+  // Mock certificate data - in a real app, you might want to fetch this
+  const mockCertificates = {
+    'dev1-jboss1': [
+      { id: 'cert1', alias: 'ssl-cert', issuer: 'CN=Test CA', subject: 'CN=dev1-jboss1', expiry_date: '2023-12-31', days_remaining: 45 },
+      { id: 'cert2', alias: 'auth-cert', issuer: 'CN=Internal CA', subject: 'CN=auth-server', expiry_date: '2023-11-15', days_remaining: 20 }
+    ],
+    'dev1-jboss2': [
+      { id: 'cert3', alias: 'ssl-cert', issuer: 'CN=Test CA', subject: 'CN=dev1-jboss2', expiry_date: '2024-01-15', days_remaining: 60 },
+      { id: 'cert4', alias: 'ldap-cert', issuer: 'CN=Internal CA', subject: 'CN=ldap-server', expiry_date: '2023-10-30', days_remaining: 5 }
+    ],
+    // Add certificates for other servers as needed
+  };
+
+  // State management
   const [selectedRegion, setSelectedRegion] = useState('');
-  const [environments, setEnvironments] = useState([]);
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
-  const [servers, setServers] = useState([]);
   const [selectedServer, setSelectedServer] = useState('');
   const [certificates, setCertificates] = useState([]);
   const [selectedCertificate, setSelectedCertificate] = useState(null);
@@ -15,78 +77,26 @@ const CertificateRenewalApp = () => {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  // Fetch regions on component mount
-  useEffect(() => {
-    const fetchRegions = async () => {
-      try {
-        setIsLoading(true);
-        const response = await axios.get('/api/regions/');
-        setRegions(response.data);
-        setIsLoading(false);
-      } catch (err) {
-        setError('Failed to fetch regions');
-        setIsLoading(false);
-      }
-    };
+  // Get current environments based on selected region
+  const getCurrentEnvironments = () => {
+    return selectedRegion ? environments[selectedRegion] : [];
+  };
 
-    fetchRegions();
-  }, []);
+  // Get current servers based on selected environment
+  const getCurrentServers = () => {
+    return selectedEnvironment ? servers[selectedEnvironment] : [];
+  };
 
-  // Fetch environments when region is selected
-  useEffect(() => {
-    if (selectedRegion) {
-      const fetchEnvironments = async () => {
-        try {
-          setIsLoading(true);
-          const response = await axios.get(`/api/environments/?region=${selectedRegion}`);
-          setEnvironments(response.data);
-          setIsLoading(false);
-        } catch (err) {
-          setError('Failed to fetch environments');
-          setIsLoading(false);
-        }
-      };
-
-      fetchEnvironments();
-    }
-  }, [selectedRegion]);
-
-  // Fetch servers when environment is selected
-  useEffect(() => {
-    if (selectedEnvironment) {
-      const fetchServers = async () => {
-        try {
-          setIsLoading(true);
-          const response = await axios.get(`/api/servers/?environment=${selectedEnvironment}`);
-          setServers(response.data);
-          setIsLoading(false);
-        } catch (err) {
-          setError('Failed to fetch servers');
-          setIsLoading(false);
-        }
-      };
-
-      fetchServers();
-    }
-  }, [selectedEnvironment]);
-
-  // Fetch certificates when server is selected
+  // Get certificates when server is selected
   useEffect(() => {
     if (selectedServer) {
-      const fetchCertificates = async () => {
-        try {
-          setIsLoading(true);
-          const response = await axios.get(`/api/certificates/?server=${selectedServer}`);
-          setCertificates(response.data);
-          setIsLoading(false);
-        } catch (err) {
-          setError('Failed to fetch certificates');
-          setIsLoading(false);
-        }
-      };
-
-      fetchCertificates();
+      // In a real app, you might want to fetch this from an API
+      // For demo purposes, we're using mock data
+      setCertificates(mockCertificates[selectedServer] || []);
+    } else {
+      setCertificates([]);
     }
+    setSelectedCertificate(null);
   }, [selectedServer]);
 
   // Handle certificate renewal
@@ -101,6 +111,7 @@ const CertificateRenewalApp = () => {
       setMessage('');
       setError('');
       
+      // This is the only API call in this version
       const response = await axios.post('/api/renew-certificate/', {
         certificate_id: selectedCertificate.id,
         server: selectedServer,
@@ -109,13 +120,12 @@ const CertificateRenewalApp = () => {
       });
 
       setMessage(response.data.message || 'Certificate renewal process initiated successfully');
-      setIsLoading(false);
       
-      // Refresh certificates list
-      const certsResponse = await axios.get(`/api/certificates/?server=${selectedServer}`);
-      setCertificates(certsResponse.data);
+      // In a real app, you might want to refresh the certificate list here
+      // by either fetching from API or updating the mock data
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to initiate certificate renewal');
+    } finally {
       setIsLoading(false);
     }
   };
@@ -142,7 +152,6 @@ const CertificateRenewalApp = () => {
                 setSelectedRegion(e.target.value);
                 setSelectedEnvironment('');
                 setSelectedServer('');
-                setCertificates([]);
               }}
               disabled={isLoading}
             >
@@ -163,12 +172,11 @@ const CertificateRenewalApp = () => {
               onChange={(e) => {
                 setSelectedEnvironment(e.target.value);
                 setSelectedServer('');
-                setCertificates([]);
               }}
               disabled={!selectedRegion || isLoading}
             >
               <option value="">Select an environment</option>
-              {environments.map(env => (
+              {getCurrentEnvironments().map(env => (
                 <option key={env.id} value={env.id}>{env.name}</option>
               ))}
             </select>
@@ -181,14 +189,11 @@ const CertificateRenewalApp = () => {
               id="serverSelect" 
               className="form-select" 
               value={selectedServer} 
-              onChange={(e) => {
-                setSelectedServer(e.target.value);
-                setCertificates([]);
-              }}
+              onChange={(e) => setSelectedServer(e.target.value)}
               disabled={!selectedEnvironment || isLoading}
             >
               <option value="">Select a server</option>
-              {servers.map(server => (
+              {getCurrentServers().map(server => (
                 <option key={server.id} value={server.id}>{server.name}</option>
               ))}
             </select>
@@ -200,7 +205,7 @@ const CertificateRenewalApp = () => {
       {selectedServer && (
         <div className="card">
           <div className="card-body">
-            <h5 className="card-title">Certificates on {servers.find(s => s.id === selectedServer)?.name}</h5>
+            <h5 className="card-title">Certificates on {getCurrentServers().find(s => s.id === selectedServer)?.name}</h5>
             
             {isLoading ? (
               <div className="text-center">
@@ -246,7 +251,7 @@ const CertificateRenewalApp = () => {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="6" className="text-center">No certificates found</td>
+                        <td colSpan="6" className="text-center">No certificates found for this server</td>
                       </tr>
                     )}
                   </tbody>
