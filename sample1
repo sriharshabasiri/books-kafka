@@ -1,264 +1,277 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 
-const regionEnvironments = {
-  dev: ['dev1', 'dev2'],
-  esqm: ['esqm1', 'esqm2', 'esqm3'],
-  perf: ['perf1', 'perf2']
-};
-
-const LogSearchForm = () => {
+const CertificateRenewalApp = () => {
+  // State for regions, environments, servers, and certificates
+  const [regions, setRegions] = useState([]);
   const [selectedRegion, setSelectedRegion] = useState('');
+  const [environments, setEnvironments] = useState([]);
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
-  const [uuid, setUuid] = useState('');
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [servers, setServers] = useState([]);
+  const [selectedServer, setSelectedServer] = useState('');
+  const [certificates, setCertificates] = useState([]);
+  const [selectedCertificate, setSelectedCertificate] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
-  // Calculate min/max dates for past week
-  const maxDate = new Date();
-  const minDate = new Date();
-  minDate.setDate(maxDate.getDate() - 7);
+  // Fetch regions on component mount
+  useEffect(() => {
+    const fetchRegions = async () => {
+      try {
+        setIsLoading(true);
+        const response = await axios.get('/api/regions/');
+        setRegions(response.data);
+        setIsLoading(false);
+      } catch (err) {
+        setError('Failed to fetch regions');
+        setIsLoading(false);
+      }
+    };
 
-  const handleRegionChange = (e) => {
-    const region = e.target.value;
-    setSelectedRegion(region);
-    setSelectedEnvironment('');
-  };
+    fetchRegions();
+  }, []);
 
-  const handleUuidChange = (e) => {
-    const value = e.target.value;
-    if (value.length <= 64) {
-      setUuid(value);
+  // Fetch environments when region is selected
+  useEffect(() => {
+    if (selectedRegion) {
+      const fetchEnvironments = async () => {
+        try {
+          setIsLoading(true);
+          const response = await axios.get(`/api/environments/?region=${selectedRegion}`);
+          setEnvironments(response.data);
+          setIsLoading(false);
+        } catch (err) {
+          setError('Failed to fetch environments');
+          setIsLoading(false);
+        }
+      };
+
+      fetchEnvironments();
     }
-  };
+  }, [selectedRegion]);
 
-  const formatDate = (date) => {
-    if (!date) return '';
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = date.toLocaleString('default', { month: 'short' });
-    const year = date.getFullYear();
-    return `${day}${month}${year}`;
-  };
+  // Fetch servers when environment is selected
+  useEffect(() => {
+    if (selectedEnvironment) {
+      const fetchServers = async () => {
+        try {
+          setIsLoading(true);
+          const response = await axios.get(`/api/servers/?environment=${selectedEnvironment}`);
+          setServers(response.data);
+          setIsLoading(false);
+        } catch (err) {
+          setError('Failed to fetch servers');
+          setIsLoading(false);
+        }
+      };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
+      fetchServers();
+    }
+  }, [selectedEnvironment]);
 
-    if (!selectedRegion || !selectedEnvironment || !uuid || !selectedDate) {
-      setError('Please fill all fields');
+  // Fetch certificates when server is selected
+  useEffect(() => {
+    if (selectedServer) {
+      const fetchCertificates = async () => {
+        try {
+          setIsLoading(true);
+          const response = await axios.get(`/api/certificates/?server=${selectedServer}`);
+          setCertificates(response.data);
+          setIsLoading(false);
+        } catch (err) {
+          setError('Failed to fetch certificates');
+          setIsLoading(false);
+        }
+      };
+
+      fetchCertificates();
+    }
+  }, [selectedServer]);
+
+  // Handle certificate renewal
+  const handleRenewCertificate = async () => {
+    if (!selectedCertificate) {
+      setError('Please select a certificate to renew');
       return;
     }
-
-    if (uuid.length !== 64) {
-      setError('UUID must be exactly 64 characters');
-      return;
-    }
-
-    const formattedDate = formatDate(selectedDate);
 
     try {
-      setIsSubmitting(true);
-      const response = await axios.post('/api/logsearch/', {
+      setIsLoading(true);
+      setMessage('');
+      setError('');
+      
+      const response = await axios.post('/api/renew-certificate/', {
+        certificate_id: selectedCertificate.id,
+        server: selectedServer,
         environment: selectedEnvironment,
-        uuid: uuid,
-        date: formattedDate
+        region: selectedRegion
       });
-      setSuccess('Log search initiated successfully!');
+
+      setMessage(response.data.message || 'Certificate renewal process initiated successfully');
+      setIsLoading(false);
+      
+      // Refresh certificates list
+      const certsResponse = await axios.get(`/api/certificates/?server=${selectedServer}`);
+      setCertificates(certsResponse.data);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to initiate log search');
-    } finally {
-      setIsSubmitting(false);
+      setError(err.response?.data?.error || 'Failed to initiate certificate renewal');
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="log-search-container">
-      <h2>Log Search</h2>
+    <div className="container mt-5">
+      <h2 className="mb-4">Certificate Renewal Portal</h2>
       
-      <form onSubmit={handleSubmit} className="inline-form">
-        {/* Region Dropdown */}
-        <div className="form-row">
-          <label htmlFor="region">Region:</label>
-          <div className="form-control">
-            <select
-              id="region"
-              value={selectedRegion}
-              onChange={handleRegionChange}
-              required
+      {error && <div className="alert alert-danger">{error}</div>}
+      {message && <div className="alert alert-success">{message}</div>}
+      
+      <div className="card mb-4">
+        <div className="card-body">
+          <h5 className="card-title">Select Certificate to Renew</h5>
+          
+          {/* Region Selection */}
+          <div className="mb-3">
+            <label htmlFor="regionSelect" className="form-label">Region</label>
+            <select 
+              id="regionSelect" 
+              className="form-select" 
+              value={selectedRegion} 
+              onChange={(e) => {
+                setSelectedRegion(e.target.value);
+                setSelectedEnvironment('');
+                setSelectedServer('');
+                setCertificates([]);
+              }}
+              disabled={isLoading}
             >
               <option value="">Select a region</option>
-              {Object.keys(regionEnvironments).map(region => (
-                <option key={region} value={region}>{region.toUpperCase()}</option>
+              {regions.map(region => (
+                <option key={region.id} value={region.id}>{region.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          {/* Environment Selection */}
+          <div className="mb-3">
+            <label htmlFor="envSelect" className="form-label">Environment</label>
+            <select 
+              id="envSelect" 
+              className="form-select" 
+              value={selectedEnvironment} 
+              onChange={(e) => {
+                setSelectedEnvironment(e.target.value);
+                setSelectedServer('');
+                setCertificates([]);
+              }}
+              disabled={!selectedRegion || isLoading}
+            >
+              <option value="">Select an environment</option>
+              {environments.map(env => (
+                <option key={env.id} value={env.id}>{env.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          {/* Server Selection */}
+          <div className="mb-3">
+            <label htmlFor="serverSelect" className="form-label">Server</label>
+            <select 
+              id="serverSelect" 
+              className="form-select" 
+              value={selectedServer} 
+              onChange={(e) => {
+                setSelectedServer(e.target.value);
+                setCertificates([]);
+              }}
+              disabled={!selectedEnvironment || isLoading}
+            >
+              <option value="">Select a server</option>
+              {servers.map(server => (
+                <option key={server.id} value={server.id}>{server.name}</option>
               ))}
             </select>
           </div>
         </div>
-
-        {/* Environment Dropdown */}
-        {selectedRegion && (
-          <div className="form-row">
-            <label htmlFor="environment">Environment:</label>
-            <div className="form-control">
-              <select
-                id="environment"
-                value={selectedEnvironment}
-                onChange={(e) => setSelectedEnvironment(e.target.value)}
-                required
-              >
-                <option value="">Select environment</option>
-                {regionEnvironments[selectedRegion].map(env => (
-                  <option key={env} value={env}>{env}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* UUID Input */}
-        <div className="form-row">
-          <label htmlFor="uuid">UUID:</label>
-          <div className="form-control">
-            <input
-              type="text"
-              id="uuid"
-              value={uuid}
-              onChange={handleUuidChange}
-              maxLength={64}
-              pattern="[a-fA-F0-9]{64}"
-              title="64 character UUID"
-              required
-            />
-            <div className="char-count">{uuid.length}/64</div>
-          </div>
-        </div>
-
-        {/* Date Picker */}
-        <div className="form-row">
-          <label htmlFor="date">Date:</label>
-          <div className="form-control">
-            <DatePicker
-              id="date"
-              selected={selectedDate}
-              onChange={(date) => setSelectedDate(date)}
-              minDate={minDate}
-              maxDate={maxDate}
-              dateFormat="yyyy-MM-dd"
-              placeholderText="Select a date"
-              required
-            />
-            {selectedDate && (
-              <div className="date-preview">{formatDate(selectedDate)}</div>
+      </div>
+      
+      {/* Certificates List */}
+      {selectedServer && (
+        <div className="card">
+          <div className="card-body">
+            <h5 className="card-title">Certificates on {servers.find(s => s.id === selectedServer)?.name}</h5>
+            
+            {isLoading ? (
+              <div className="text-center">
+                <div className="spinner-border" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </div>
+              </div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>Select</th>
+                      <th>Alias</th>
+                      <th>Issuer</th>
+                      <th>Subject</th>
+                      <th>Expiry Date</th>
+                      <th>Days Remaining</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {certificates.length > 0 ? (
+                      certificates.map(cert => (
+                        <tr key={cert.id} className={cert.days_remaining < 30 ? 'table-warning' : ''}>
+                          <td>
+                            <input 
+                              type="radio" 
+                              name="certificate" 
+                              checked={selectedCertificate?.id === cert.id}
+                              onChange={() => setSelectedCertificate(cert)}
+                            />
+                          </td>
+                          <td>{cert.alias}</td>
+                          <td>{cert.issuer}</td>
+                          <td>{cert.subject}</td>
+                          <td>{cert.expiry_date}</td>
+                          <td>
+                            <span className={cert.days_remaining < 30 ? 'text-danger fw-bold' : ''}>
+                              {cert.days_remaining}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="6" className="text-center">No certificates found</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </div>
-        </div>
-
-        {/* Submit Button */}
-        <div className="form-row">
-          <div className="form-control">
-            <button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Submitting...' : 'Search Logs'}
-            </button>
-          </div>
-        </div>
-
-        {/* Status Messages */}
-        {(error || success) && (
-          <div className="form-row">
-            <div className="form-message">
-              {error && <div className="error-message">{error}</div>}
-              {success && <div className="success-message">{success}</div>}
+            
+            <div className="d-flex justify-content-end mt-3">
+              <button 
+                className="btn btn-primary" 
+                onClick={handleRenewCertificate}
+                disabled={!selectedCertificate || isLoading}
+              >
+                {isLoading ? (
+                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                ) : (
+                  'Renew Selected Certificate'
+                )}
+              </button>
             </div>
           </div>
-        )}
-      </form>
+        </div>
+      )}
     </div>
   );
 };
 
-export default LogSearchForm;
-
-
-
-.log-search-container {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 20px;
-}
-
-.inline-form {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-
-.form-row {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-}
-
-.form-row label {
-  min-width: 100px;
-  text-align: right;
-  font-weight: bold;
-}
-
-.form-control {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.form-control select,
-.form-control input {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  min-width: 200px;
-}
-
-.form-control .react-datepicker-wrapper {
-  flex: 1;
-}
-
-.char-count,
-.date-preview {
-  color: #666;
-  font-size: 0.9em;
-  min-width: 120px;
-}
-
-button {
-  background-color: #1976d2;
-  color: white;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-button:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
-}
-
-.error-message {
-  color: #d32f2f;
-  margin-top: 5px;
-}
-
-.success-message {
-  color: #388e3c;
-  margin-top: 5px;
-}
-
-.form-message {
-  margin-left: 115px; /* Align with input fields */
-}
+export default CertificateRenewalApp;
