@@ -1,75 +1,125 @@
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from scipy import stats
 
-# Load your CSV data
-df = pd.read_csv('your_data.csv')  # Replace with your file path
-print(df.head())
-
-# Convert timestamp to datetime and extract features
+# Load data
+df = pd.read_csv('your_data.csv')
 df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+## Feature Engineering =======================================================
+
+# Time-based features
 df['minute_of_day'] = df['timestamp'].dt.hour * 60 + df['timestamp'].dt.minute
-df['day_of_week'] = df['timestamp'].dt.dayofweek  # Monday=0, Sunday=6
+df['hour'] = df['timestamp'].dt.hour
+df['day_part'] = pd.cut(df['hour'], 
+                       bins=[0, 6, 12, 18, 24],
+                       labels=['night', 'morning', 'afternoon', 'evening'],
+                       right=False)
 
-# Prepare features - we'll use minute_of_day and transaction count
-X = df[['minute_of_day', 'no_of_txns']].values
+# Time-aware expected transaction ranges
+time_period_stats = df.groupby('day_part')['no_of_txns'].agg(['mean', 'std']).to_dict()
+df['expected_mean'] = df['day_part'].map(time_period_stats['mean'])
+df['expected_std'] = df['day_part'].map(time_period_stats['std'])
 
-# Scale the features (important for Isolation Forest)
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+# Deviation from expected
+df['z_score'] = (df['no_of_txns'] - df['expected_mean']) / df['expected_std']
+df['pct_of_expected'] = df['no_of_txns'] / df['expected_mean']
 
-# Train Isolation Forest model
-model = IsolationForest(
-    n_estimators=100,
-    contamination=0.05,  # Expected % of anomalies - adjust based on your data
-    random_state=42,
-    verbose=1
+# Weekend flag
+df['is_weekend'] = df['timestamp'].dt.dayofweek.isin([5, 6]).astype(int)
+
+## Prepare Features =========================================================
+
+features = df[[
+    'minute_of_day',
+    'no_of_txns',
+    'z_score',
+    'pct_of_expected',
+    'is_weekend'
+]]
+
+categorical_features = ['day_part']
+numeric_features = ['minute_of_day', 'no_of_txns', 'z_score', 'pct_of_expected']
+
+preprocessor = ColumnTransformer([
+    ('num', RobustScaler(), numeric_features),
+    ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+])
+
+## Model Training ===========================================================
+
+model = make_pipeline(
+    preprocessor,
+    IsolationForest(
+        n_estimators=300,
+        contamination='auto',  # Let model determine anomaly rate
+        random_state=42,
+        verbose=1,
+        max_features=0.8  # Use subset of features for each tree
+    )
 )
-model.fit(X_scaled)
 
-# Predict anomalies (-1 for anomaly, 1 for normal)
-df['anomaly'] = model.predict(X_scaled)
+model.fit(features)
 
-# Get anomaly scores (the lower, the more anomalous)
-df['anomaly_score'] = model.decision_function(X_scaled)
+## Predictions ==============================================================
 
-# Analyze results
+df['anomaly_score'] = model.decision_function(features)
+df['anomaly'] = model.predict(features)
+
+# Post-processing to ensure extreme values are caught
+high_threshold = df['no_of_txns'].quantile(0.99)
+low_threshold = df['no_of_txns'].quantile(0.01)
+df.loc[(df['no_of_txns'] > high_threshold) | 
+       (df['no_of_txns'] < low_threshold), 'anomaly'] = -1
+
+## Analysis =================================================================
+
 anomalies = df[df['anomaly'] == -1]
-print(f"\nDetected {len(anomalies)} anomalies:")
-print(anomalies.sort_values('anomaly_score')[['timestamp', 'no_of_txns', 'anomaly_score']])
+print(f"Detected {len(anomalies)} anomalies:")
+print(anomalies.sort_values('anomaly_score')[['timestamp', 'no_of_txns', 'day_part', 'anomaly_score']])
 
-# Visualize the results
-plt.figure(figsize=(14, 6))
+## Visualization ============================================================
 
-# Plot normal points
-normal = df[df['anomaly'] == 1]
-plt.scatter(normal['minute_of_day'], normal['no_of_txns'], 
-            c='blue', alpha=0.5, label='Normal')
+plt.figure(figsize=(18, 8))
 
-# Plot anomalies
+# Plot 1: Transactions by time of day with anomalies
+plt.subplot(1, 2, 1)
+for day_part in df['day_part'].unique():
+    subset = df[df['day_part'] == day_part]
+    plt.scatter(subset['minute_of_day'], subset['no_of_txns'], 
+                alpha=0.5, label=day_part)
+
 anomalies = df[df['anomaly'] == -1]
-plt.scatter(anomalies['minute_of_day'], anomalies['no_of_txns'], 
+plt.scatter(anomalies['minute_of_day'], anomalies['no_of_txns'],
             c='red', s=100, edgecolor='black', label='Anomaly')
 
-# Highlight top anomalies
-top_anomalies = anomalies.nsmallest(3, 'anomaly_score')
-for i, row in top_anomalies.iterrows():
-    plt.annotate(f"Score: {row['anomaly_score']:.2f}", 
-                (row['minute_of_day'], row['no_of_txns']),
-                textcoords="offset points", xytext=(0,10), ha='center')
-
-plt.title("Transaction Anomaly Detection by Minute of Day")
-plt.xlabel("Minute of Day (0-1440)")
-plt.ylabel("Number of Transactions")
-plt.xticks(np.arange(0, 1441, 120))  # Show every 2 hours
-plt.grid(True)
+plt.title("Transactions by Time of Day")
+plt.xlabel("Minute of Day")
+plt.ylabel("Transaction Count")
 plt.legend()
+
+# Plot 2: Expected vs Actual with anomalies
+plt.subplot(1, 2, 2)
+plt.scatter(df['expected_mean'], df['no_of_txns'], alpha=0.5, label='Normal')
+plt.scatter(anomalies['expected_mean'], anomalies['no_of_txns'],
+            c='red', s=100, edgecolor='black', label='Anomaly')
+plt.plot([df['expected_mean'].min(), df['expected_mean'].max()],
+         [df['expected_mean'].min(), df['expected_mean'].max()],
+         'g--', label='Expected')
+
+plt.title("Actual vs Expected Transactions")
+plt.xlabel("Expected Transactions")
+plt.ylabel("Actual Transactions")
+plt.legend()
+
 plt.tight_layout()
 plt.show()
 
-# Save results to new CSV
-df.to_csv('transaction_data_with_anomalies.csv', index=False)
-print("\nResults saved to 'transaction_data_with_anomalies.csv'")
+# Save results
+df.to_csv('time_aware_anomaly_results.csv', index=False)
