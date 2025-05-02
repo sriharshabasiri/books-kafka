@@ -1,1 +1,75 @@
 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+
+# Load your CSV data
+df = pd.read_csv('your_data.csv')  # Replace with your file path
+print(df.head())
+
+# Convert timestamp to datetime and extract features
+df['timestamp'] = pd.to_datetime(df['timestamp'])
+df['minute_of_day'] = df['timestamp'].dt.hour * 60 + df['timestamp'].dt.minute
+df['day_of_week'] = df['timestamp'].dt.dayofweek  # Monday=0, Sunday=6
+
+# Prepare features - we'll use minute_of_day and transaction count
+X = df[['minute_of_day', 'no_of_txns']].values
+
+# Scale the features (important for Isolation Forest)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Train Isolation Forest model
+model = IsolationForest(
+    n_estimators=100,
+    contamination=0.05,  # Expected % of anomalies - adjust based on your data
+    random_state=42,
+    verbose=1
+)
+model.fit(X_scaled)
+
+# Predict anomalies (-1 for anomaly, 1 for normal)
+df['anomaly'] = model.predict(X_scaled)
+
+# Get anomaly scores (the lower, the more anomalous)
+df['anomaly_score'] = model.decision_function(X_scaled)
+
+# Analyze results
+anomalies = df[df['anomaly'] == -1]
+print(f"\nDetected {len(anomalies)} anomalies:")
+print(anomalies.sort_values('anomaly_score')[['timestamp', 'no_of_txns', 'anomaly_score']])
+
+# Visualize the results
+plt.figure(figsize=(14, 6))
+
+# Plot normal points
+normal = df[df['anomaly'] == 1]
+plt.scatter(normal['minute_of_day'], normal['no_of_txns'], 
+            c='blue', alpha=0.5, label='Normal')
+
+# Plot anomalies
+anomalies = df[df['anomaly'] == -1]
+plt.scatter(anomalies['minute_of_day'], anomalies['no_of_txns'], 
+            c='red', s=100, edgecolor='black', label='Anomaly')
+
+# Highlight top anomalies
+top_anomalies = anomalies.nsmallest(3, 'anomaly_score')
+for i, row in top_anomalies.iterrows():
+    plt.annotate(f"Score: {row['anomaly_score']:.2f}", 
+                (row['minute_of_day'], row['no_of_txns']),
+                textcoords="offset points", xytext=(0,10), ha='center')
+
+plt.title("Transaction Anomaly Detection by Minute of Day")
+plt.xlabel("Minute of Day (0-1440)")
+plt.ylabel("Number of Transactions")
+plt.xticks(np.arange(0, 1441, 120))  # Show every 2 hours
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Save results to new CSV
+df.to_csv('transaction_data_with_anomalies.csv', index=False)
+print("\nResults saved to 'transaction_data_with_anomalies.csv'")
