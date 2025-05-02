@@ -1,1 +1,32 @@
+import requests
+import re
+from datadog import initialize, api
 
+# Step 1: Initialize Datadog API
+options = {
+    "api_key": "YOUR_DATADOG_API_KEY",
+    "app_key": "YOUR_DATADOG_APP_KEY"
+}
+
+initialize(**options)
+
+# Step 2: Make the HTTP request to the login page
+url = "https://finrhelprod.discoverfinancial.com/SSO/ui/SSOLogin.jsp"
+response = requests.get(url, timeout=10)
+html = response.text
+
+# Step 3: Extract 'na' from var pageDomain
+match = re.search(r"var\s+pageDomain\s*=\s*'([a-zA-Z0-9\-]+)\.discoverfinancial\.com'", html)
+if match:
+    region = match.group(1)  # e.g., 'na'
+    print(f"Active region: {region}")
+
+    # Step 4: Send a custom gauge metric to Datadog
+    api.Metric.send(
+        metric="custom.active_region",
+        points=1,
+        tags=[f"region:{region}"],
+        type="gauge"
+    )
+else:
+    print("Could not extract region from response")
